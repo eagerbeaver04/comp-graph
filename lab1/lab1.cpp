@@ -1,5 +1,5 @@
 ﻿#include <windows.h>
-#include <d3d11_1.h>
+#include <d3d11.h>
 #include <directxcolors.h>
 #include "framework.h"
 #include "Resource.h"
@@ -12,12 +12,10 @@ HINSTANCE               g_hInst = nullptr;
 HWND                    g_hWnd = nullptr;
 D3D_DRIVER_TYPE         g_driverType = D3D_DRIVER_TYPE_NULL;
 D3D_FEATURE_LEVEL       g_featureLevel = D3D_FEATURE_LEVEL_11_0;
+
 ID3D11Device* g_pd3dDevice = nullptr;
-ID3D11Device1* g_pd3dDevice1 = nullptr;
 ID3D11DeviceContext* g_pImmediateContext = nullptr;
-ID3D11DeviceContext1* g_pImmediateContext1 = nullptr;
 IDXGISwapChain* g_pSwapChain = nullptr;
-IDXGISwapChain1* g_pSwapChain1 = nullptr;
 ID3D11RenderTargetView* g_pRenderTargetView = nullptr;
 
 XMVECTORF32 g_clearColor = Colors::Aquamarine;
@@ -80,9 +78,9 @@ HRESULT InitWindow(HINSTANCE hInstance, int nCmdShow)
         return E_FAIL;
 
     g_hInst = hInstance;
-    RECT rc = { 0, 0, 800, 600};
+    RECT rc = { 0, 0, 800, 600 };
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-    g_hWnd = CreateWindow(L"WindowClassByMihail", L"Markov Mikhail Denisovich", 
+    g_hWnd = CreateWindow(L"WindowClassByMihail", L"Markov Mikhail Denisovich",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance,
         nullptr);
@@ -185,7 +183,6 @@ HRESULT InitDevice()
 
     D3D_FEATURE_LEVEL featureLevels[] =
     {
-        D3D_FEATURE_LEVEL_11_1,
         D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1,
         D3D_FEATURE_LEVEL_10_0,
@@ -197,12 +194,6 @@ HRESULT InitDevice()
         g_driverType = driverTypes[driverTypeIndex];
         hr = D3D11CreateDevice(nullptr, g_driverType, nullptr, createDeviceFlags, featureLevels, numFeatureLevels,
             D3D11_SDK_VERSION, &g_pd3dDevice, &g_featureLevel, &g_pImmediateContext);
-
-        if (hr == E_INVALIDARG)
-        {
-            hr = D3D11CreateDevice(nullptr, g_driverType, nullptr, createDeviceFlags, &featureLevels[1], numFeatureLevels - 1,
-                D3D11_SDK_VERSION, &g_pd3dDevice, &g_featureLevel, &g_pImmediateContext);
-        }
 
         if (SUCCEEDED(hr))
             break;
@@ -229,52 +220,21 @@ HRESULT InitDevice()
     if (FAILED(hr))
         return hr;
 
-    IDXGIFactory2* dxgiFactory2 = nullptr;
-    hr = dxgiFactory->QueryInterface(__uuidof(IDXGIFactory2), reinterpret_cast<void**>(&dxgiFactory2));
-    if (dxgiFactory2)
-    {
-        hr = g_pd3dDevice->QueryInterface(__uuidof(ID3D11Device1), reinterpret_cast<void**>(&g_pd3dDevice1));
-        if (SUCCEEDED(hr))
-        {
-            (void)g_pImmediateContext->QueryInterface(__uuidof(ID3D11DeviceContext1), reinterpret_cast<void**>(&g_pImmediateContext1));
-        }
+    DXGI_SWAP_CHAIN_DESC sd;
+    ZeroMemory(&sd, sizeof(sd));
+    sd.BufferCount = 1;
+    sd.BufferDesc.Width = width;
+    sd.BufferDesc.Height = height;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow = g_hWnd;
+    sd.SampleDesc.Count = 1;
+    sd.SampleDesc.Quality = 0;
+    sd.Windowed = TRUE;
 
-        DXGI_SWAP_CHAIN_DESC1 sd;
-        ZeroMemory(&sd, sizeof(sd));
-        sd.Width = width;
-        sd.Height = height;
-        sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        sd.SampleDesc.Count = 1;
-        sd.SampleDesc.Quality = 0;
-        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sd.BufferCount = 1;
-
-        hr = dxgiFactory2->CreateSwapChainForHwnd(g_pd3dDevice, g_hWnd, &sd, nullptr, nullptr, &g_pSwapChain1);
-        if (SUCCEEDED(hr))
-        {
-            hr = g_pSwapChain1->QueryInterface(__uuidof(IDXGISwapChain), reinterpret_cast<void**>(&g_pSwapChain));
-        }
-
-        dxgiFactory2->Release();
-    }
-    else
-    {
-        DXGI_SWAP_CHAIN_DESC sd;
-        ZeroMemory(&sd, sizeof(sd));
-        sd.BufferCount = 1;
-        sd.BufferDesc.Width = width;
-        sd.BufferDesc.Height = height;
-        sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        sd.BufferDesc.RefreshRate.Numerator = 60;
-        sd.BufferDesc.RefreshRate.Denominator = 1;
-        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sd.OutputWindow = g_hWnd;
-        sd.SampleDesc.Count = 1;
-        sd.SampleDesc.Quality = 0;
-        sd.Windowed = TRUE;
-
-        hr = dxgiFactory->CreateSwapChain(g_pd3dDevice, &sd, &g_pSwapChain);
-    }
+    hr = dxgiFactory->CreateSwapChain(g_pd3dDevice, &sd, &g_pSwapChain);
 
     dxgiFactory->MakeWindowAssociation(g_hWnd, DXGI_MWA_NO_ALT_ENTER);
 
@@ -310,7 +270,7 @@ HRESULT InitDevice()
 void Render()
 {
     static float t = 0.0f;
-    t += 0.0005f; 
+    t += 0.0005f;
 
     g_clearColor.f[0] = (sinf(t) + 1.0f) * 0.5f;
     g_clearColor.f[1] = (sinf(t + XM_2PI / 3) + 1.0f) * 0.5f;
@@ -325,10 +285,7 @@ void CleanupDevice()
     if (g_pImmediateContext) g_pImmediateContext->ClearState();
 
     if (g_pRenderTargetView) g_pRenderTargetView->Release();
-    if (g_pSwapChain1) g_pSwapChain1->Release();
     if (g_pSwapChain) g_pSwapChain->Release();
-    if (g_pImmediateContext1) g_pImmediateContext1->Release();
     if (g_pImmediateContext) g_pImmediateContext->Release();
-    if (g_pd3dDevice1) g_pd3dDevice1->Release();
     if (g_pd3dDevice) g_pd3dDevice->Release();
 }
