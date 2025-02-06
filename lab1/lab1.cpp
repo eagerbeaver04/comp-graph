@@ -111,8 +111,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_SIZE:
         if (g_pSwapChain && wParam != SIZE_MINIMIZED)
         {
-            XMVECTORF32 savedColor = g_clearColor;
-
             if (g_pRenderTargetView)
             {
                 g_pImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
@@ -146,9 +144,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     g_pImmediateContext->RSSetViewports(1, &vp);
                 }
             }
-            g_clearColor = savedColor;
 
-            Render();
         }
         break;
 
@@ -222,7 +218,7 @@ HRESULT InitDevice()
 
     DXGI_SWAP_CHAIN_DESC sd;
     ZeroMemory(&sd, sizeof(sd));
-    sd.BufferCount = 1;
+    sd.BufferCount = 2;
     sd.BufferDesc.Width = width;
     sd.BufferDesc.Height = height;
     sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -233,6 +229,8 @@ HRESULT InitDevice()
     sd.SampleDesc.Count = 1;
     sd.SampleDesc.Quality = 0;
     sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    sd.Flags = 0;
 
     hr = dxgiFactory->CreateSwapChain(g_pd3dDevice, &sd, &g_pSwapChain);
 
