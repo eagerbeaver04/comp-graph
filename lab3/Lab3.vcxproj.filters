@@ -49,5 +49,6 @@
   <ItemGroup>
     <CopyFileToFolders Include="PS.hlsl" />
     <CopyFileToFolders Include="VS.hlsl" />
+    <CopyFileToFolders Include="lab3.fx" />
   </ItemGroup>
 </Project>

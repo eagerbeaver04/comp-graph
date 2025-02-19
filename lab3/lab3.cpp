@@ -24,15 +24,11 @@
 
 using namespace DirectX;
 
-//--------------------------------------------------------------------------------------
-// Structures
-//--------------------------------------------------------------------------------------
 struct SimpleVertex
 {
     XMFLOAT3 Pos;
     XMFLOAT4 Color;
 };
-
 
 struct ConstantBuffer
 {
@@ -42,10 +38,9 @@ struct ConstantBuffer
     XMMATRIX mTranslation;
 };
 
+float g_CameraPitch = 0.0f;
+float g_CameraYaw = 0.0f;
 
-//--------------------------------------------------------------------------------------
-// Global Variables
-//--------------------------------------------------------------------------------------
 HINSTANCE               g_hInst = nullptr;
 HWND                    g_hWnd = nullptr;
 D3D_DRIVER_TYPE         g_driverType = D3D_DRIVER_TYPE_NULL;
@@ -68,20 +63,12 @@ XMMATRIX                g_View;
 XMMATRIX                g_Projection;
 
 
-//--------------------------------------------------------------------------------------
-// Forward declarations
-//--------------------------------------------------------------------------------------
 HRESULT InitWindow(HINSTANCE hInstance, int nCmdShow);
 HRESULT InitDevice();
 void CleanupDevice();
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 void Render();
 
-
-//--------------------------------------------------------------------------------------
-// Entry point to the program. Initializes everything and goes into a message processing 
-// loop. Idle time is used to render the scene.
-//--------------------------------------------------------------------------------------
 int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow)
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
@@ -96,7 +83,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
         return 0;
     }
 
-    // Main message loop
     MSG msg = { 0 };
     while (WM_QUIT != msg.message)
     {
@@ -116,13 +102,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     return (int)msg.wParam;
 }
 
-
-//--------------------------------------------------------------------------------------
-// Register class and create window
-//--------------------------------------------------------------------------------------
 HRESULT InitWindow(HINSTANCE hInstance, int nCmdShow)
 {
-    // Register class
     WNDCLASSEX wcex;
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.style = CS_HREDRAW | CS_VREDRAW;
@@ -139,12 +120,11 @@ HRESULT InitWindow(HINSTANCE hInstance, int nCmdShow)
     if (!RegisterClassEx(&wcex))
         return E_FAIL;
 
-    // Create window
     g_hInst = hInstance;
     RECT rc = { 0, 0, 800, 600 };
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
     g_hWnd = CreateWindow(L"WindowClassByMikhail", L"Markov Mikhail Denisovich",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance,
         nullptr);
     if (!g_hWnd)
@@ -155,25 +135,13 @@ HRESULT InitWindow(HINSTANCE hInstance, int nCmdShow)
     return S_OK;
 }
 
-
-//--------------------------------------------------------------------------------------
-// Helper for compiling shaders with D3DCompile
-//
-// With VS 11, we could load up prebuilt .cso files instead...
-//--------------------------------------------------------------------------------------
 HRESULT CompileShaderFromFile(WCHAR* szFileName, LPCSTR szEntryPoint, LPCSTR szShaderModel, ID3DBlob** ppBlobOut)
 {
     HRESULT hr = S_OK;
 
     DWORD dwShaderFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #ifdef _DEBUG
-    // Set the D3DCOMPILE_DEBUG flag to embed debug information in the shaders.
-    // Setting this flag improves the shader debugging experience, but still allows 
-    // the shaders to be optimized and to run exactly the way they will run in 
-    // the release configuration of this program.
     dwShaderFlags |= D3DCOMPILE_DEBUG;
-
-    // Disable optimizations to further improve shader debugging
     dwShaderFlags |= D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
 
@@ -194,10 +162,6 @@ HRESULT CompileShaderFromFile(WCHAR* szFileName, LPCSTR szEntryPoint, LPCSTR szS
     return S_OK;
 }
 
-
-//--------------------------------------------------------------------------------------
-// Create Direct3D device and swap chain
-//--------------------------------------------------------------------------------------
 HRESULT InitDevice()
 {
     HRESULT hr = S_OK;
@@ -237,7 +201,6 @@ HRESULT InitDevice()
 
         if (hr == E_INVALIDARG)
         {
-            // DirectX 11.0 platforms will not recognize D3D_FEATURE_LEVEL_11_1, so retry without it
             hr = D3D11CreateDevice(nullptr, g_driverType, nullptr, createDeviceFlags, &featureLevels[1], numFeatureLevels - 1,
                 D3D11_SDK_VERSION, &g_pd3dDevice, &g_featureLevel, &g_pImmediateContext);
         }
@@ -248,7 +211,6 @@ HRESULT InitDevice()
     if (FAILED(hr))
         return hr;
 
-    // Obtain DXGI factory from device
     IDXGIFactory1* dxgiFactory = nullptr;
     {
         IDXGIDevice* dxgiDevice = nullptr;
@@ -268,12 +230,10 @@ HRESULT InitDevice()
     if (FAILED(hr))
         return hr;
 
-    // Create swap chain using flip-model
     IDXGIFactory2* dxgiFactory2 = nullptr;
     hr = dxgiFactory->QueryInterface(__uuidof(IDXGIFactory2), reinterpret_cast<void**>(&dxgiFactory2));
     if (dxgiFactory2)
     {
-        // DirectX 11.1 or later
         hr = g_pd3dDevice->QueryInterface(__uuidof(ID3D11Device1), reinterpret_cast<void**>(&g_pd3dDevice1));
         if (SUCCEEDED(hr))
         {
@@ -288,8 +248,8 @@ HRESULT InitDevice()
         sd.SampleDesc.Count = 1;
         sd.SampleDesc.Quality = 0;
         sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sd.BufferCount = 2; // Double buffering for flip-model
-        sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD; // Modern swap effect
+        sd.BufferCount = 2;
+        sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         sd.Flags = 0;
 
         hr = dxgiFactory2->CreateSwapChainForHwnd(g_pd3dDevice, g_hWnd, &sd, nullptr, nullptr, &g_pSwapChain1);
@@ -302,7 +262,6 @@ HRESULT InitDevice()
     }
     else
     {
-        // DirectX 11.0 systems (fallback, not recommended)
         DXGI_SWAP_CHAIN_DESC sd;
         ZeroMemory(&sd, sizeof(sd));
         sd.BufferCount = 1;
@@ -316,20 +275,19 @@ HRESULT InitDevice()
         sd.SampleDesc.Count = 1;
         sd.SampleDesc.Quality = 0;
         sd.Windowed = TRUE;
-        sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD; // Legacy swap effect
+        sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
         sd.Flags = 0;
 
         hr = dxgiFactory->CreateSwapChain(g_pd3dDevice, &sd, &g_pSwapChain);
     }
 
-    // Block ALT+ENTER for full-screen (this tutorial doesn't handle it)
     dxgiFactory->MakeWindowAssociation(g_hWnd, DXGI_MWA_NO_ALT_ENTER);
     dxgiFactory->Release();
 
     if (FAILED(hr))
         return hr;
 
-    // Create a render target view
+
     ID3D11Texture2D* pBackBuffer = nullptr;
     hr = g_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&pBackBuffer));
     if (FAILED(hr))
@@ -342,7 +300,6 @@ HRESULT InitDevice()
 
     g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 
-    // Setup the viewport
     D3D11_VIEWPORT vp;
     vp.Width = (FLOAT)width;
     vp.Height = (FLOAT)height;
@@ -352,7 +309,6 @@ HRESULT InitDevice()
     vp.TopLeftY = 0;
     g_pImmediateContext->RSSetViewports(1, &vp);
 
-    // Compile the vertex shader
     ID3DBlob* pVSBlob = nullptr;
     hr = CompileShaderFromFile(const_cast<wchar_t*>(L"lab3.fx"), "VS", "vs_4_0", &pVSBlob);
     if (FAILED(hr))
@@ -361,7 +317,6 @@ HRESULT InitDevice()
         return hr;
     }
 
-    // Create the vertex shader
     hr = g_pd3dDevice->CreateVertexShader(pVSBlob->GetBufferPointer(), pVSBlob->GetBufferSize(), nullptr, &g_pVertexShader);
     if (FAILED(hr))
     {
@@ -369,7 +324,6 @@ HRESULT InitDevice()
         return hr;
     }
 
-    // Define the input layout
     D3D11_INPUT_ELEMENT_DESC layout[] =
     {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -377,16 +331,13 @@ HRESULT InitDevice()
     };
     UINT numElements = ARRAYSIZE(layout);
 
-    // Create the input layout
     hr = g_pd3dDevice->CreateInputLayout(layout, numElements, pVSBlob->GetBufferPointer(), pVSBlob->GetBufferSize(), &g_pVertexLayout);
     pVSBlob->Release();
     if (FAILED(hr))
         return hr;
 
-    // Set the input layout
     g_pImmediateContext->IASetInputLayout(g_pVertexLayout);
 
-    // Compile the pixel shader
     ID3DBlob* pPSBlob = nullptr;
     hr = CompileShaderFromFile(const_cast<wchar_t*>(L"lab3.fx"), "PS", "ps_4_0", &pPSBlob);
     if (FAILED(hr))
@@ -395,13 +346,11 @@ HRESULT InitDevice()
         return hr;
     }
 
-    // Create the pixel shader
     hr = g_pd3dDevice->CreatePixelShader(pPSBlob->GetBufferPointer(), pPSBlob->GetBufferSize(), nullptr, &g_pPixelShader);
     pPSBlob->Release();
     if (FAILED(hr))
         return hr;
 
-    // Create vertex buffer
     SimpleVertex vertices[] =
     {
         { XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
@@ -426,12 +375,10 @@ HRESULT InitDevice()
     if (FAILED(hr))
         return hr;
 
-    // Set vertex buffer
     UINT stride = sizeof(SimpleVertex);
     UINT offset = 0;
     g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
 
-    // Create index buffer
     WORD indices[] =
     {
         3,1,0,
@@ -453,7 +400,7 @@ HRESULT InitDevice()
         7,4,6,
     };
     bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.ByteWidth = sizeof(WORD) * 36; // 36 vertices needed for 12 triangles
+    bd.ByteWidth = sizeof(WORD) * 36;
     bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
     bd.CPUAccessFlags = 0;
     InitData.pSysMem = indices;
@@ -461,13 +408,10 @@ HRESULT InitDevice()
     if (FAILED(hr))
         return hr;
 
-    // Set index buffer
     g_pImmediateContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 
-    // Set primitive topology
     g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // Create the constant buffer
     bd.Usage = D3D11_USAGE_DEFAULT;
     bd.ByteWidth = sizeof(ConstantBuffer);
     bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
@@ -476,25 +420,19 @@ HRESULT InitDevice()
     if (FAILED(hr))
         return hr;
 
-    // Initialize the world matrix
     g_World = XMMatrixIdentity();
 
-    // Initialize the view matrix
     XMVECTOR Eye = XMVectorSet(0.0f, 1.0f, -5.0f, 0.0f);
     XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     g_View = XMMatrixLookAtLH(Eye, At, Up);
 
-    // Initialize the projection matrix
     g_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV2, width / (FLOAT)height, 0.01f, 100.0f);
 
     return S_OK;
 }
 
 
-//--------------------------------------------------------------------------------------
-// Clean up the objects we've created
-//--------------------------------------------------------------------------------------
 void CleanupDevice()
 {
     if (g_pImmediateContext) g_pImmediateContext->ClearState();
@@ -514,10 +452,6 @@ void CleanupDevice()
     if (g_pd3dDevice) g_pd3dDevice->Release();
 }
 
-
-//--------------------------------------------------------------------------------------
-// Called every time the application receives a message
-//--------------------------------------------------------------------------------------
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     PAINTSTRUCT ps;
@@ -530,12 +464,63 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         EndPaint(hWnd, &ps);
         break;
 
+    case WM_SIZE:
+        if (g_pSwapChain && wParam != SIZE_MINIMIZED)
+        {
+            if (g_pRenderTargetView)
+            {
+                g_pImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
+                g_pRenderTargetView->Release();
+                g_pRenderTargetView = nullptr;
+            }
+
+            g_pSwapChain->ResizeBuffers(0, LOWORD(lParam), HIWORD(lParam), DXGI_FORMAT_UNKNOWN, 0);
+
+            ID3D11Texture2D* pBackBuffer = nullptr;
+            g_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&pBackBuffer));
+            if (pBackBuffer)
+            {
+                g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_pRenderTargetView);
+                pBackBuffer->Release();
+            }
+
+            g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+
+            D3D11_VIEWPORT vp;
+            vp.Width = (FLOAT)LOWORD(lParam);
+            vp.Height = (FLOAT)HIWORD(lParam);
+            vp.MinDepth = 0.0f;
+            vp.MaxDepth = 1.0f;
+            vp.TopLeftX = 0;
+            vp.TopLeftY = 0;
+            g_pImmediateContext->RSSetViewports(1, &vp);
+
+
+            g_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV2, vp.Width / vp.Height, 0.01f, 100.0f);
+        }
+        break;
+
+    case WM_KEYDOWN:
+        switch (wParam)
+        {
+        case VK_UP:
+            g_CameraPitch += 0.01f;
+            break;
+        case VK_DOWN:
+            g_CameraPitch -= 0.01f;
+            break;
+        case VK_LEFT:
+            g_CameraYaw -= 0.01f;
+            break;
+        case VK_RIGHT:
+            g_CameraYaw += 0.01f;
+            break;
+        }
+        break;
+
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
-
-        // Note that this tutorial does not handle resizing (WM_SIZE) requests,
-        // so we created the window without the resize border.
 
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
@@ -544,13 +529,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
-
-//--------------------------------------------------------------------------------------
-// Render a frame
-//--------------------------------------------------------------------------------------
 void Render()
 {
-    // Update our time
     static float t = 0.0f;
     if (g_driverType == D3D_DRIVER_TYPE_REFERENCE)
     {
@@ -565,47 +545,38 @@ void Render()
         t = (timeCur - timeStart) / 1000.0f;
     }
 
-    //
-    // Animate the cube
-    //
     g_World = XMMatrixRotationY(t);
 
-    // Create a translation matrix that moves along the Z-axis
     float zTranslation = sin(t) * 2.0f;
     XMMATRIX translationMatrix = XMMatrixTranslation(0.0f, 0.0f, zTranslation);
 
-    // Combine world and translation matrices
     g_World = g_World * translationMatrix;
 
-    //
-    // Clear the back buffer
-    //
+    XMMATRIX rotationMatrix = XMMatrixRotationRollPitchYaw(g_CameraPitch, g_CameraYaw, 0.0f);
+    XMVECTOR Eye = XMVectorSet(0.0f, 1.0f, -5.0f, 0.0f);
+    XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+    Eye = XMVector3TransformCoord(Eye, rotationMatrix);
+    At = XMVector3TransformCoord(At, rotationMatrix);
+    Up = XMVector3TransformNormal(Up, rotationMatrix);
+
+    g_View = XMMatrixLookAtLH(Eye, At, Up);
+
     g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, Colors::MidnightBlue);
 
-    //
-    // Update variables
-    //
     ConstantBuffer cb;
     cb.mWorld = XMMatrixTranspose(g_World);
     cb.mView = XMMatrixTranspose(g_View);
     cb.mProjection = XMMatrixTranspose(g_Projection);
     g_pImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 
-    //
-    // Bind the Render Target View (RTV) to the pipeline
-    //
     g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 
-    //
-    // Renders a triangle
-    //
     g_pImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
     g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
     g_pImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
-    g_pImmediateContext->DrawIndexed(36, 0, 0); // 36 vertices needed for 12 triangles in a triangle list
+    g_pImmediateContext->DrawIndexed(36, 0, 0);
 
-    //
-    // Present our back buffer to our front buffer
-    //
     g_pSwapChain->Present(0, 0);
 }
