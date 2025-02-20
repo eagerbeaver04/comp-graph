@@ -1,18 +1,4 @@
-﻿//--------------------------------------------------------------------------------------
-// File: Tutorial04.cpp
-//
-// This application displays a 3D cube using Direct3D 11
-//
-// http://msdn.microsoft.com/en-us/library/windows/apps/ff729721.aspx
-//
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
-//
-// Copyright (c) Microsoft Corporation. All rights reserved.
-//--------------------------------------------------------------------------------------
-#include <windows.h>
+﻿#include <windows.h>
 #include <d3d11_1.h>
 #include <d3dcompiler.h>
 #include <directxmath.h>
@@ -30,12 +16,15 @@ struct SimpleVertex
     XMFLOAT4 Color;
 };
 
-struct ConstantBuffer
+struct ConstantBufferWorld
 {
     XMMATRIX mWorld;
+};
+
+struct ConstantBufferViewProjection
+{
     XMMATRIX mView;
     XMMATRIX mProjection;
-    XMMATRIX mTranslation;
 };
 
 float g_CameraPitch = 0.0f;
@@ -57,7 +46,8 @@ ID3D11PixelShader* g_pPixelShader = nullptr;
 ID3D11InputLayout* g_pVertexLayout = nullptr;
 ID3D11Buffer* g_pVertexBuffer = nullptr;
 ID3D11Buffer* g_pIndexBuffer = nullptr;
-ID3D11Buffer* g_pConstantBuffer = nullptr;
+ID3D11Buffer* g_pConstantBufferWorld = nullptr;
+ID3D11Buffer* g_pConstantBufferViewProjection = nullptr;
 XMMATRIX                g_World;
 XMMATRIX                g_View;
 XMMATRIX                g_Projection;
@@ -287,7 +277,6 @@ HRESULT InitDevice()
     if (FAILED(hr))
         return hr;
 
-
     ID3D11Texture2D* pBackBuffer = nullptr;
     hr = g_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&pBackBuffer));
     if (FAILED(hr))
@@ -412,11 +401,16 @@ HRESULT InitDevice()
 
     g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.ByteWidth = sizeof(ConstantBuffer);
+    bd.Usage = D3D11_USAGE_DYNAMIC;
+    bd.ByteWidth = sizeof(ConstantBufferWorld);
     bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    bd.CPUAccessFlags = 0;
-    hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer);
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBufferWorld);
+    if (FAILED(hr))
+        return hr;
+
+    bd.ByteWidth = sizeof(ConstantBufferViewProjection);
+    hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBufferViewProjection);
     if (FAILED(hr))
         return hr;
 
@@ -437,7 +431,8 @@ void CleanupDevice()
 {
     if (g_pImmediateContext) g_pImmediateContext->ClearState();
 
-    if (g_pConstantBuffer) g_pConstantBuffer->Release();
+    if (g_pConstantBufferWorld) g_pConstantBufferWorld->Release();
+    if (g_pConstantBufferViewProjection) g_pConstantBufferViewProjection->Release();
     if (g_pVertexBuffer) g_pVertexBuffer->Release();
     if (g_pIndexBuffer) g_pIndexBuffer->Release();
     if (g_pVertexLayout) g_pVertexLayout->Release();
@@ -565,16 +560,25 @@ void Render()
 
     g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, Colors::MidnightBlue);
 
-    ConstantBuffer cb;
-    cb.mWorld = XMMatrixTranspose(g_World);
-    cb.mView = XMMatrixTranspose(g_View);
-    cb.mProjection = XMMatrixTranspose(g_Projection);
-    g_pImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    ConstantBufferWorld cbWorld;
+    cbWorld.mWorld = XMMatrixTranspose(g_World);
+    g_pImmediateContext->Map(g_pConstantBufferWorld, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
+    memcpy(mappedResource.pData, &cbWorld, sizeof(ConstantBufferWorld));
+    g_pImmediateContext->Unmap(g_pConstantBufferWorld, 0);
+
+    ConstantBufferViewProjection cbViewProjection;
+    cbViewProjection.mView = XMMatrixTranspose(g_View);
+    cbViewProjection.mProjection = XMMatrixTranspose(g_Projection);
+    g_pImmediateContext->Map(g_pConstantBufferViewProjection, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
+    memcpy(mappedResource.pData, &cbViewProjection, sizeof(ConstantBufferViewProjection));
+    g_pImmediateContext->Unmap(g_pConstantBufferViewProjection, 0);
 
     g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 
     g_pImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
-    g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
+    g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferWorld);
+    g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferViewProjection);
     g_pImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
     g_pImmediateContext->DrawIndexed(36, 0, 0);
 
