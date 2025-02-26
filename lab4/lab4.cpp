@@ -4,6 +4,7 @@
 #include <directxmath.h>
 #include <directxcolors.h>
 #include "resource.h"
+#include "DDSTextureLoader.h"
 
 #pragma comment(lib,"d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")

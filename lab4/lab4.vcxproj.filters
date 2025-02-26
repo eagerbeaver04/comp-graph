@@ -24,17 +24,17 @@
     <ClInclude Include="Resource.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="lab3.h">
+    <ClInclude Include="lab4.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="lab3.cpp">
+    <ClCompile Include="lab4.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="lab3.rc">
+    <ResourceCompile Include="lab4.rc">
       <Filter>Файлы ресурсов</Filter>
     </ResourceCompile>
   </ItemGroup>
@@ -42,13 +42,13 @@
     <Image Include="small.ico">
       <Filter>Файлы ресурсов</Filter>
     </Image>
-    <Image Include="lab3.ico">
+    <Image Include="lab4.ico">
       <Filter>Файлы ресурсов</Filter>
     </Image>
   </ItemGroup>
   <ItemGroup>
     <CopyFileToFolders Include="PS.hlsl" />
     <CopyFileToFolders Include="VS.hlsl" />
-    <CopyFileToFolders Include="lab3.fx" />
+    <CopyFileToFolders Include="lab4.fx" />
   </ItemGroup>
 </Project>
