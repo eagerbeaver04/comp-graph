@@ -58,5 +58,7 @@
   <ItemGroup>
     <CopyFileToFolders Include="lab4.fx" />
     <CopyFileToFolders Include="skybox.fx" />
+    <CopyFileToFolders Include="cube.dds" />
+    <CopyFileToFolders Include="skybox.dds" />
   </ItemGroup>
 </Project>
