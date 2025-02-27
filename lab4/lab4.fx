@@ -1,43 +1,40 @@
-cbuffer ConstantBufferWorld : register(b0)
+cbuffer ModelBuffer : register(b0)
 {
-    matrix mWorld;
+    matrix m;
 };
 
-cbuffer ConstantBufferViewProjection : register(b1)
+cbuffer VPBuffer : register(b1)
 {
-    matrix mView;
-    matrix mProjection;
+    matrix vp;
 };
 
 struct VS_INPUT
 {
-    float4 Pos : POSITION;
-    float4 Color : COLOR;
+    float3 pos : POSITION;
+    float2 tex : TEXCOORD;
 };
 
 struct PS_INPUT
 {
-    float4 Pos : SV_POSITION;
-    float4 Color : COLOR;
+    float4 pos : SV_POSITION;
+    float2 tex : TEXCOORD;
 };
 
-struct VS_OUTPUT
+PS_INPUT VS(VS_INPUT input)
 {
-    float4 Pos : SV_POSITION;
-    float4 Color : COLOR0;
-};
-
-VS_OUTPUT VS(float4 Pos : POSITION, float4 Color : COLOR)
-{
-    VS_OUTPUT output = (VS_OUTPUT)0;
-    output.Pos = mul(Pos, mWorld);
-    output.Pos = mul(output.Pos, mView);
-    output.Pos = mul(output.Pos, mProjection);
-    output.Color = Color;
+    PS_INPUT output;
+    float4 pos = float4(input.pos, 1.0);
+    output.pos = mul(pos, m);
+    output.pos = mul(output.pos, vp);
+    output.tex = input.tex;
     return output;
 }
 
-float4 PS(VS_OUTPUT input) : SV_Target
+Texture2D myTexture : register(t0);
+SamplerState samLinear : register(s0);
+
+float4 PS(PS_INPUT input) : SV_Target
 {
-    return input.Color;
+    return myTexture.Sample(samLinear, input.tex);
 }
+

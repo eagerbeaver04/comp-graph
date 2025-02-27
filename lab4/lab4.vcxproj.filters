@@ -27,10 +27,19 @@
     <ClInclude Include="lab4.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="DDSTextureLoader.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="vertices.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="lab4.cpp">
       <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="DDSTextureLoader.cpp">
+      <Filter>Файлы заголовков</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -47,8 +56,7 @@
     </Image>
   </ItemGroup>
   <ItemGroup>
-    <CopyFileToFolders Include="PS.hlsl" />
-    <CopyFileToFolders Include="VS.hlsl" />
     <CopyFileToFolders Include="lab4.fx" />
+    <CopyFileToFolders Include="skybox.fx" />
   </ItemGroup>
 </Project>
