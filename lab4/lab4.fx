@@ -30,11 +30,11 @@ PS_INPUT VS(VS_INPUT input)
     return output;
 }
 
-Texture2D myTexture : register(t0);
+Texture2D cubeTex : register(t0);
 SamplerState samLinear : register(s0);
 
 float4 PS(PS_INPUT input) : SV_Target
 {
-    return myTexture.Sample(samLinear, input.tex);
+    return cubeTex.Sample(samLinear, input.tex);
 }
 
