@@ -2,6 +2,8 @@
 #include <directxcolors.h>
 #include "DDSTextureLoader.h"
 #include "vertices.h"
+#include <vector>
+#include <algorithm>
 
 using namespace DirectX;
 
@@ -27,6 +29,16 @@ ID3D11Buffer *g_pSkyboxVertexBuffer = nullptr;
 ID3D11Buffer *g_pSkyboxVPBuffer = nullptr;
 ID3D11ShaderResourceView *g_pSkyboxTextureRV = nullptr;
 
+ID3D11VertexShader* g_pColorCubeVS = nullptr;
+ID3D11PixelShader* g_pColorCubePS = nullptr;
+ID3D11InputLayout* g_pColorCubeInputLayout = nullptr;
+ID3D11Buffer* g_pColorCubeModelBuffer = nullptr;
+ID3D11Buffer* g_pColorCubeColorBuffer = nullptr;
+ID3D11BlendState* g_pBlendState = nullptr;
+ID3D11DepthStencilState* g_pTransparentDepthState = nullptr;
+ID3D11DepthStencilState* g_pTransparentDepthStencilState = nullptr;
+ID3D11BlendState* g_pTransparentBlendState = nullptr;
+
 float g_CubeAngle = 0.0f;
 float g_CameraAngle = 0.0f;
 bool g_MouseDragging = false;
@@ -43,6 +55,33 @@ void Render();
 
 const std::wstring windowTitle = L"Mikhail Markov";
 const std::wstring windowClass = L"MikhailMarkovClass";
+
+std::vector<CubeData> g_Cubes = {
+	{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true },   // Красный полупрозрачный
+	{ XMFLOAT4(0.0f, 1.0f, 0.0f, 0.5f), XMMatrixIdentity(), true },   // Зеленый полупрозрачный
+	{ XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f), XMMatrixIdentity(), false }   // Синий непрозрачный
+};
+
+struct TransparentObject {
+	XMMATRIX worldMatrix;
+	XMFLOAT4 color;
+	float distanceToCamera;
+};
+
+std::vector<TransparentObject> g_TransparentObjects;
+
+void SortTransparentObjects(XMVECTOR cameraPosition) {
+    for (auto& obj : g_TransparentObjects) {
+        XMVECTOR objPos = obj.worldMatrix.r[3];
+        obj.distanceToCamera = XMVectorGetX(XMVector3LengthSq(objPos - cameraPosition));
+    }
+
+    std::sort(g_TransparentObjects.begin(), g_TransparentObjects.end(),
+        [](const TransparentObject& a, const TransparentObject& b) {
+            return a.distanceToCamera > b.distanceToCamera;
+        });
+}
+
 
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
 {
@@ -146,13 +185,17 @@ HRESULT InitDevice(HWND hWnd)
 	descDepth.Height = height;
 	descDepth.MipLevels = 1;
 	descDepth.ArraySize = 1;
-	descDepth.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	descDepth.Format = DXGI_FORMAT_D32_FLOAT;
 	descDepth.SampleDesc.Count = 1;
 	descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 	ID3D11Texture2D *pDepthStencil = nullptr;
 	hr = g_pd3dDevice->CreateTexture2D(&descDepth, nullptr, &pDepthStencil);
 	if (FAILED(hr))
-		return hr;
+	{
+		descDepth.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		hr = g_pd3dDevice->CreateTexture2D(&descDepth, nullptr, &pDepthStencil);
+		if (FAILED(hr)) return hr;
+	}
 	hr = g_pd3dDevice->CreateDepthStencilView(pDepthStencil, nullptr, &g_pDepthStencilView);
 	pDepthStencil->Release();
 	if (FAILED(hr))
@@ -330,6 +373,74 @@ HRESULT InitGraphics()
 	if (FAILED(hr))
 		return hr;
 
+	pBlob = nullptr;
+
+	// Вершинный шейдер
+	hr = CompileShaderFromFile(const_cast<wchar_t*>(L"transparent.fx"), "VS", "vs_4_0", &pBlob);
+	if (FAILED(hr)) return hr;
+	hr = g_pd3dDevice->CreateVertexShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &g_pColorCubeVS);
+	if (FAILED(hr)) { pBlob->Release(); return hr; }
+
+	// Input layout
+	D3D11_INPUT_ELEMENT_DESC layoutColorDesc[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+	};
+	hr = g_pd3dDevice->CreateInputLayout(layoutColorDesc, 1, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &g_pColorCubeInputLayout);
+	pBlob->Release();
+	if (FAILED(hr)) return hr;
+
+	// Пиксельный шейдер
+	hr = CompileShaderFromFile(const_cast<wchar_t*>(L"transparent.fx"), "PS", "ps_4_0", &pBlob);
+	if (FAILED(hr)) return hr;
+	hr = g_pd3dDevice->CreatePixelShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &g_pColorCubePS);
+	pBlob->Release();
+	if (FAILED(hr)) return hr;
+
+	// Инициализация буферов
+	bd = {};
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.ByteWidth = sizeof(XMMATRIX);
+	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pColorCubeModelBuffer);
+	if (FAILED(hr)) return hr;
+
+	bd.ByteWidth = sizeof(XMFLOAT4);
+	hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pColorCubeColorBuffer);
+	if (FAILED(hr)) return hr;
+
+	// Настройка состояний блендинга
+	D3D11_BLEND_DESC blendDesc = {};
+	blendDesc.RenderTarget[0].BlendEnable = TRUE;
+
+	// Настройки для цветовых каналов
+	blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+	blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+	blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+
+	// Настройки для альфа-канала
+	blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+	blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+	blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+
+	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+	hr = g_pd3dDevice->CreateBlendState(&blendDesc, &g_pTransparentBlendState);
+	if (FAILED(hr))
+		return hr;
+
+	D3D11_DEPTH_STENCIL_DESC depthDesc = {};
+	depthDesc.DepthEnable = TRUE;
+	depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+	depthDesc.DepthFunc = D3D11_COMPARISON_LESS;
+	hr = g_pd3dDevice->CreateDepthStencilState(&depthDesc, &g_pTransparentDepthState);
+	if (FAILED(hr))
+		return hr;
+
+	// Позиционируем кубы
+	g_Cubes[0].modelMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f); // Красный слева
+	g_Cubes[1].modelMatrix = XMMatrixTranslation(2.0f, 0.0f, 0.0f);  // Зеленый справа
+	g_Cubes[2].modelMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);  // Синий сверху
+
 	return S_OK;
 }
 
@@ -419,6 +530,15 @@ void CleanupDevice()
 		g_pSkyboxVPBuffer->Release();
 	if (g_pSkyboxTextureRV)
 		g_pSkyboxTextureRV->Release();
+	if (g_pColorCubeModelBuffer) g_pColorCubeModelBuffer->Release();
+	if (g_pColorCubeColorBuffer) g_pColorCubeColorBuffer->Release();
+	if (g_pColorCubeInputLayout) g_pColorCubeInputLayout->Release();
+	if (g_pColorCubeVS) g_pColorCubeVS->Release();
+	if (g_pColorCubePS) g_pColorCubePS->Release();
+	if (g_pBlendState) g_pBlendState->Release();
+	if (g_pTransparentDepthState) g_pTransparentDepthState->Release();
+	if (g_pTransparentDepthStencilState) g_pTransparentDepthStencilState->Release();
+	if (g_pTransparentBlendState) g_pTransparentBlendState->Release();
 }
 
 void CubeRender()
@@ -452,6 +572,51 @@ void SkyboxRender()
 	g_pImmediateContext->Draw(36, 0);
 }
 
+void RenderColorCubes(const XMMATRIX& view, const XMMATRIX& proj) {
+	// Общие настройки
+	UINT stride = sizeof(SimpleVertex);
+	UINT offset = 0;
+	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
+	g_pImmediateContext->IASetInputLayout(g_pColorCubeInputLayout);
+	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	g_pImmediateContext->VSSetShader(g_pColorCubeVS, nullptr, 0);
+	g_pImmediateContext->PSSetShader(g_pColorCubePS, nullptr, 0);
+
+	// Обновляем VP матрицу
+	XMMATRIX vp = XMMatrixTranspose(view * proj);
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+		memcpy(mapped.pData, &vp, sizeof(XMMATRIX));
+		g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
+	}
+
+	for (auto& cube : g_Cubes) {
+		// Настройка состояний рендеринга
+		if (cube.isTransparent) {
+			float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			g_pImmediateContext->OMSetBlendState(g_pTransparentBlendState, blendFactor, 0xffffffff);
+			g_pImmediateContext->OMSetDepthStencilState(g_pTransparentDepthState, 0);
+		}
+		else {
+			g_pImmediateContext->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+			g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
+		}
+
+		// Обновляем константные буферы
+		XMMATRIX modelT = XMMatrixTranspose(cube.modelMatrix);
+		g_pImmediateContext->UpdateSubresource(g_pColorCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
+		g_pImmediateContext->UpdateSubresource(g_pColorCubeColorBuffer, 0, nullptr, &cube.color, 0, 0);
+
+		// Устанавливаем буферы
+		g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pColorCubeModelBuffer);
+		g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
+		g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pColorCubeColorBuffer);
+
+		// Отрисовка
+		g_pImmediateContext->Draw(36, 0);
+	}
+}
+
 void UpdateCubeTransform(const XMMATRIX& view, const XMMATRIX& proj)
 {
 	g_CubeAngle += 0.01f;
@@ -471,7 +636,7 @@ void UpdateCubeTransform(const XMMATRIX& view, const XMMATRIX& proj)
 	}
 }
 
-void UpdateCamera(XMMATRIX& view, XMMATRIX& proj)
+XMVECTOR UpdateCamera(XMMATRIX& view, XMMATRIX& proj)
 {
 	RECT rc;
 	GetClientRect(FindWindow(windowClass.c_str(), windowTitle.c_str()), &rc);
@@ -486,6 +651,7 @@ void UpdateCamera(XMMATRIX& view, XMMATRIX& proj)
 	XMVECTOR focusPoint = XMVectorZero();
 	XMVECTOR upDir = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 	view = XMMatrixLookAtLH(eyePos, focusPoint, upDir);
+	return XMVectorSet(camX, camY, camZ, 0.0f);
 }
 
 void SetupSkyboxStates()
@@ -519,7 +685,7 @@ void Render()
 	g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
 	XMMATRIX view, proj;
-	UpdateCamera(view, proj);
+	XMVECTOR camPos = UpdateCamera(view, proj);
 
 	XMMATRIX viewSkybox = view;
 	viewSkybox.r[3] = XMVectorSet(0, 0, 0, 1);
@@ -534,11 +700,15 @@ void Render()
 
 	SetupSkyboxStates();
 	SkyboxRender();
+
 	g_pImmediateContext->RSSetState(nullptr);
 
 	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
 	UpdateCubeTransform(view, proj);
 	CubeRender();
+
+	RenderColorCubes(view, proj);
+
 
 	g_pSwapChain->Present(1, 0);
 }

@@ -28,6 +28,17 @@ struct Vertices
     static SkyboxVertex g_SkyboxVertices[];
 };
 
+struct CubeData {
+    XMFLOAT4 color;
+    XMMATRIX modelMatrix;
+    bool isTransparent;
+
+    XMFLOAT3 GetPosition() const {
+        XMFLOAT3 pos;
+        XMStoreFloat3(&pos, modelMatrix.r[3]);
+        return pos;
+    }
+};
 SimpleVertex Vertices::g_CubeVertices[] = {
     { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f } },
     { {  0.5f, -0.5f,  0.5f }, { 1.0f, 1.0f } },
