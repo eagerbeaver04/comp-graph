@@ -545,7 +545,7 @@ XMVECTOR UpdateCamera(XMMATRIX& view, XMMATRIX& proj)
 	float aspect = static_cast<float>(rc.right - rc.left) / (rc.bottom - rc.top);
 	proj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 100.0f);
 
-	float radius = 5.0f;
+	static const float radius = 7.0f;
 	float camX = radius * sinf(g_CameraAzimuth) * cosf(g_CameraElevation);
 	float camY = radius * sinf(g_CameraElevation);
 	float camZ = radius * cosf(g_CameraAzimuth) * cosf(g_CameraElevation);
@@ -634,6 +634,7 @@ void SortTransparentObjects(XMVECTOR cameraPosition, std::vector<CubeData*>& tra
 		});
 
 }
+
 void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos) {
 	XMMATRIX vp = XMMatrixTranspose(view * proj);
 
