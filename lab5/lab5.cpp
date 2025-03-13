@@ -56,32 +56,22 @@ void Render();
 const std::wstring windowTitle = L"Mikhail Markov";
 const std::wstring windowClass = L"MikhailMarkovClass";
 
-std::vector<CubeData> g_Cubes = {
-	{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true },   // Красный полупрозрачный
-	{ XMFLOAT4(0.0f, 1.0f, 0.0f, 0.5f), XMMatrixIdentity(), true },   // Зеленый полупрозрачный
-	{ XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f), XMMatrixIdentity(), false }   // Синий непрозрачный
-};
-
-struct TransparentObject {
-	XMMATRIX worldMatrix;
+struct CubeData {
 	XMFLOAT4 color;
-	float distanceToCamera;
+	XMMATRIX modelMatrix;
+	bool isTransparent;
+	bool isTextured;
 };
 
-std::vector<TransparentObject> g_TransparentObjects;
+std::vector<CubeData> g_Cubes = {
+	{ XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMMatrixTranslation(0.0f, 0.0f, 0.0f), false, true},
+	{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
+	{ XMFLOAT4(0.0f, 1.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
+	{ XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f), XMMatrixIdentity(), false, false }
+};
 
-void SortTransparentObjects(XMVECTOR cameraPosition) {
-    for (auto& obj : g_TransparentObjects) {
-        XMVECTOR objPos = obj.worldMatrix.r[3];
-        obj.distanceToCamera = XMVectorGetX(XMVector3LengthSq(objPos - cameraPosition));
-    }
-
-    std::sort(g_TransparentObjects.begin(), g_TransparentObjects.end(),
-        [](const TransparentObject& a, const TransparentObject& b) {
-            return a.distanceToCamera > b.distanceToCamera;
-        });
-}
-
+std::vector<CubeData*> g_TransparentObjects;
+std::vector<CubeData*> g_NonTransparentObjects;
 
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
 {
@@ -375,13 +365,11 @@ HRESULT InitGraphics()
 
 	pBlob = nullptr;
 
-	// Вершинный шейдер
 	hr = CompileShaderFromFile(const_cast<wchar_t*>(L"transparent.fx"), "VS", "vs_4_0", &pBlob);
 	if (FAILED(hr)) return hr;
 	hr = g_pd3dDevice->CreateVertexShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &g_pColorCubeVS);
 	if (FAILED(hr)) { pBlob->Release(); return hr; }
 
-	// Input layout
 	D3D11_INPUT_ELEMENT_DESC layoutColorDesc[] = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
 	};
@@ -389,14 +377,12 @@ HRESULT InitGraphics()
 	pBlob->Release();
 	if (FAILED(hr)) return hr;
 
-	// Пиксельный шейдер
 	hr = CompileShaderFromFile(const_cast<wchar_t*>(L"transparent.fx"), "PS", "ps_4_0", &pBlob);
 	if (FAILED(hr)) return hr;
 	hr = g_pd3dDevice->CreatePixelShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &g_pColorCubePS);
 	pBlob->Release();
 	if (FAILED(hr)) return hr;
 
-	// Инициализация буферов
 	bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
 	bd.ByteWidth = sizeof(XMMATRIX);
@@ -408,16 +394,13 @@ HRESULT InitGraphics()
 	hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pColorCubeColorBuffer);
 	if (FAILED(hr)) return hr;
 
-	// Настройка состояний блендинга
 	D3D11_BLEND_DESC blendDesc = {};
 	blendDesc.RenderTarget[0].BlendEnable = TRUE;
 
-	// Настройки для цветовых каналов
 	blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
 	blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
 	blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
 
-	// Настройки для альфа-канала
 	blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
 	blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
 	blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
@@ -436,10 +419,9 @@ HRESULT InitGraphics()
 	if (FAILED(hr))
 		return hr;
 
-	// Позиционируем кубы
-	g_Cubes[0].modelMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f); // Красный слева
-	g_Cubes[1].modelMatrix = XMMatrixTranslation(2.0f, 0.0f, 0.0f);  // Зеленый справа
-	g_Cubes[2].modelMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);  // Синий сверху
+	g_Cubes[1].modelMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f);
+	g_Cubes[2].modelMatrix = XMMatrixTranslation(2.0f, 0.0f, 0.0f);
+	g_Cubes[3].modelMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
 
 	return S_OK;
 }
@@ -541,22 +523,6 @@ void CleanupDevice()
 	if (g_pTransparentBlendState) g_pTransparentBlendState->Release();
 }
 
-void CubeRender()
-{
-	UINT stride = sizeof(SimpleVertex);
-	UINT offset = 0;
-	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
-	g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
-	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
-	g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
-	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);
-	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
-	g_pImmediateContext->PSSetShaderResources(0, 1, &g_pCubeTextureRV);
-	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
-	g_pImmediateContext->Draw(36, 0);
-}
-
 void SkyboxRender()
 {
 	UINT stride = sizeof(SkyboxVertex);
@@ -570,70 +536,6 @@ void SkyboxRender()
 	g_pImmediateContext->PSSetShaderResources(0, 1, &g_pSkyboxTextureRV);
 	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
 	g_pImmediateContext->Draw(36, 0);
-}
-
-void RenderColorCubes(const XMMATRIX& view, const XMMATRIX& proj) {
-	// Общие настройки
-	UINT stride = sizeof(SimpleVertex);
-	UINT offset = 0;
-	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
-	g_pImmediateContext->IASetInputLayout(g_pColorCubeInputLayout);
-	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	g_pImmediateContext->VSSetShader(g_pColorCubeVS, nullptr, 0);
-	g_pImmediateContext->PSSetShader(g_pColorCubePS, nullptr, 0);
-
-	// Обновляем VP матрицу
-	XMMATRIX vp = XMMatrixTranspose(view * proj);
-	D3D11_MAPPED_SUBRESOURCE mapped;
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-		memcpy(mapped.pData, &vp, sizeof(XMMATRIX));
-		g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
-	}
-
-	for (auto& cube : g_Cubes) {
-		// Настройка состояний рендеринга
-		if (cube.isTransparent) {
-			float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-			g_pImmediateContext->OMSetBlendState(g_pTransparentBlendState, blendFactor, 0xffffffff);
-			g_pImmediateContext->OMSetDepthStencilState(g_pTransparentDepthState, 0);
-		}
-		else {
-			g_pImmediateContext->OMSetBlendState(nullptr, nullptr, 0xffffffff);
-			g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
-		}
-
-		// Обновляем константные буферы
-		XMMATRIX modelT = XMMatrixTranspose(cube.modelMatrix);
-		g_pImmediateContext->UpdateSubresource(g_pColorCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
-		g_pImmediateContext->UpdateSubresource(g_pColorCubeColorBuffer, 0, nullptr, &cube.color, 0, 0);
-
-		// Устанавливаем буферы
-		g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pColorCubeModelBuffer);
-		g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
-		g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pColorCubeColorBuffer);
-
-		// Отрисовка
-		g_pImmediateContext->Draw(36, 0);
-	}
-}
-
-void UpdateCubeTransform(const XMMATRIX& view, const XMMATRIX& proj)
-{
-	g_CubeAngle += 0.01f;
-	float radiusCube = 1.0f;
-	float cubeX = radiusCube * cosf(g_CubeAngle);
-	float cubeY = radiusCube * sinf(g_CubeAngle);
-	XMMATRIX model = XMMatrixTranslation(cubeX, cubeY, 0.0f) * XMMatrixRotationY(g_CubeAngle);
-	XMMATRIX modelT = XMMatrixTranspose(model);
-	g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
-
-	XMMATRIX vpCube = XMMatrixTranspose(view * proj);
-	D3D11_MAPPED_SUBRESOURCE mappedResource;
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource)))
-	{
-		memcpy(mappedResource.pData, &vpCube, sizeof(XMMATRIX));
-		g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
-	}
 }
 
 XMVECTOR UpdateCamera(XMMATRIX& view, XMMATRIX& proj)
@@ -677,10 +579,108 @@ void SetupSkyboxStates()
 	}
 }
 
-void Render()
+void PrepareTextureCube(CubeData* cube)
 {
-	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
+	g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
+	g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
+	g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
+	g_pImmediateContext->PSSetShaderResources(0, 1, &g_pCubeTextureRV);
+	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
 
+	XMMATRIX modelT = XMMatrixTranspose(cube->modelMatrix);
+	g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
+	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);
+}
+
+void PrepareColorCube(CubeData* cube)
+{
+	g_pImmediateContext->IASetInputLayout(g_pColorCubeInputLayout);
+	g_pImmediateContext->VSSetShader(g_pColorCubeVS, nullptr, 0);
+	g_pImmediateContext->PSSetShader(g_pColorCubePS, nullptr, 0);
+
+	XMMATRIX modelT = XMMatrixTranspose(cube->modelMatrix);
+	g_pImmediateContext->UpdateSubresource(g_pColorCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
+	g_pImmediateContext->UpdateSubresource(g_pColorCubeColorBuffer, 0, nullptr, &(cube->color), 0, 0);
+	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pColorCubeModelBuffer);
+	g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pColorCubeColorBuffer);
+}
+
+void DrawCube()
+{
+	UINT stride = sizeof(SimpleVertex);
+	UINT offset = 0;
+	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
+	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
+	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	g_pImmediateContext->Draw(36, 0);
+}
+
+template<typename F>
+void RenderCube(CubeData* cube, F&& postPrepareFunc)
+{
+	if (cube->isTextured) 
+		PrepareTextureCube(cube);
+	else 
+		PrepareColorCube(cube);
+	postPrepareFunc();
+	DrawCube();
+}
+
+void SortTransparentObjects(XMVECTOR cameraPosition, std::vector<CubeData*>& transparentCubes) {
+	std::sort(transparentCubes.begin(), transparentCubes.end(),
+		[cameraPosition](const auto& a, const auto& b) {
+			return XMVectorGetX(XMVector3LengthSq(a->modelMatrix.r[3] - cameraPosition)) > 
+				XMVectorGetX(XMVector3LengthSq(b->modelMatrix.r[3] - cameraPosition));
+		});
+
+}
+void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos) {
+	XMMATRIX vp = XMMatrixTranspose(view * proj);
+
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+		memcpy(mapped.pData, &vp, sizeof(XMMATRIX));
+		g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
+	}
+	static float cubeAngle = 0.0f;
+	cubeAngle += 0.005f;
+
+	const float zAmplitude = 3.0f;
+	const float zFrequency = 0.8f;
+
+	float z = zAmplitude * sinf(cubeAngle * zFrequency);
+
+	g_Cubes[0].modelMatrix = XMMatrixTranslation(0.0f, 0.0f, z) *
+		XMMatrixRotationZ(cubeAngle * 2.5f);
+
+	g_TransparentObjects.clear();
+	g_NonTransparentObjects.clear();
+
+	for (auto& cube : g_Cubes)
+		if (cube.isTransparent)
+			g_TransparentObjects.push_back(&cube);
+		else
+			g_NonTransparentObjects.push_back(&cube);
+	
+	SortTransparentObjects(cameraPos, g_TransparentObjects);
+
+	for (auto& cube : g_NonTransparentObjects) {
+		RenderCube(cube, []() {g_pImmediateContext->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+		g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);});
+	}
+	for (auto& cube : g_TransparentObjects) 
+	{
+		RenderCube(cube, []() {
+			float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			g_pImmediateContext->OMSetBlendState(g_pTransparentBlendState, blendFactor, 0xffffffff);
+			g_pImmediateContext->OMSetDepthStencilState(g_pTransparentDepthState, 0);});
+	}
+}
+
+
+
+void Render() {
+	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
 	g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, Colors::MidnightBlue);
 	g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
@@ -691,24 +691,17 @@ void Render()
 	viewSkybox.r[3] = XMVectorSet(0, 0, 0, 1);
 	XMMATRIX vpSkybox = XMMatrixTranspose(viewSkybox * proj);
 
-	D3D11_MAPPED_SUBRESOURCE mappedResource;
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pSkyboxVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource)))
-	{
-		memcpy(mappedResource.pData, &vpSkybox, sizeof(XMMATRIX));
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pSkyboxVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+		memcpy(mapped.pData, &vpSkybox, sizeof(XMMATRIX));
 		g_pImmediateContext->Unmap(g_pSkyboxVPBuffer, 0);
 	}
 
 	SetupSkyboxStates();
 	SkyboxRender();
-
 	g_pImmediateContext->RSSetState(nullptr);
 
-	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
-	UpdateCubeTransform(view, proj);
-	CubeRender();
-
-	RenderColorCubes(view, proj);
-
+	RenderCubes(view, proj, camPos);
 
 	g_pSwapChain->Present(1, 0);
 }
