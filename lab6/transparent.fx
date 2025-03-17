@@ -1,7 +1,6 @@
 cbuffer ModelBuffer : register(b0)
 {
     matrix m;
-    matrix normal_m;
 };
 
 cbuffer VPBuffer : register(b1)
@@ -47,7 +46,7 @@ PS_INPUT VS(VS_INPUT input)
     float4 worldPos = mul(float4(input.pos, 1.0), m);
     output.worldPos = worldPos.xyz;
     output.pos = mul(worldPos, vp);
-    output.normal = mul(input.normal, (float3x3)normal_m);
+    output.normal = mul(input.normal, (float3x3)m);
     return output;
 }
 

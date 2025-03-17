@@ -1,7 +1,6 @@
 cbuffer ModelBuffer : register(b0)
 {
     matrix m;
-    matrix normal_m;
 };
 
 cbuffer VPBuffer : register(b1)
@@ -48,8 +47,8 @@ PS_INPUT VS(VS_INPUT input)
     output.pos = mul(worldPos, vp);
     output.tex = input.tex;
 
-    float3 T = normalize(mul(input.tangent, (float3x3)normal_m));
-    float3 N = normalize(mul(input.normal, (float3x3)normal_m));
+    float3 T = normalize(mul(input.tangent, (float3x3)m));
+    float3 N = normalize(mul(input.normal, (float3x3)m));
 
     T = normalize(T - dot(T, N) * N);
     float3 B = cross(N, T);

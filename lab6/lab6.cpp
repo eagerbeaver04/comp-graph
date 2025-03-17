@@ -74,11 +74,6 @@ struct CubeData {
 	bool isTextured;
 };
 
-struct modelData {
-	XMMATRIX model;
-	XMMATRIX normalMatrix;
-} ;
-
 Light g_Lights[2] = {
 	{ XMFLOAT4(2.0f, 2.0f, 2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) },
 	{ XMFLOAT4(0.0f, 2.0f, -2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) } };
@@ -632,16 +627,13 @@ void SetupSkyboxStates()
 	}
 }
 
-modelData prepareModelData(CubeData* cube)
+XMMATRIX prepareModelData(CubeData* cube)
 {
 	XMMATRIX modelMatrix = cube->modelMatrix;
 
-	XMMATRIX invTransposeModel = XMMatrixInverse(nullptr, modelMatrix);
-	XMMATRIX normalT = XMMatrixTranspose(invTransposeModel);
-
 	XMMATRIX modelT = XMMatrixTranspose(modelMatrix);
 
-	return { modelT,normalT };
+	return modelT;
 }
 
 void PrepareTextureCube(CubeData* cube)
@@ -653,7 +645,7 @@ void PrepareTextureCube(CubeData* cube)
 	g_pImmediateContext->PSSetShaderResources(0, 2, textures);
 	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
 
-	modelData data = prepareModelData(cube);
+	XMMATRIX data = prepareModelData(cube);
 	g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr, &data, 0, 0);
 	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);    
 	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);       
@@ -667,7 +659,7 @@ void PrepareColorCube(CubeData* cube)
 	g_pImmediateContext->VSSetShader(g_pColorCubeVS, nullptr, 0);
 	g_pImmediateContext->PSSetShader(g_pColorCubePS, nullptr, 0);
 
-	modelData data = prepareModelData(cube);
+	XMMATRIX data = prepareModelData(cube);
 	g_pImmediateContext->UpdateSubresource(g_pColorCubeModelBuffer, 0, nullptr, &data, 0, 0);
 	g_pImmediateContext->UpdateSubresource(g_pColorCubeColorBuffer, 0, nullptr, &(cube->color), 0, 0);
 	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pColorCubeModelBuffer); 
