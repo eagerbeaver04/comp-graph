@@ -46,6 +46,16 @@ POINT g_LastMousePos = {0, 0};
 float g_CameraAzimuth = 0.0f;
 float g_CameraElevation = 0.0f;
 
+struct Light {
+	XMFLOAT4 Position;
+	XMFLOAT4 Color;
+	XMFLOAT4 Attenuation;
+};
+
+ID3D11Buffer* g_pLightBuffer = nullptr;
+ID3D11Buffer* g_pCameraBuffer = nullptr;
+XMFLOAT3 g_CameraPos;
+
 BOOL InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 HRESULT InitDevice(HWND hWnd);
@@ -69,6 +79,10 @@ std::vector<CubeData> g_Cubes = {
 	{ XMFLOAT4(0.0f, 1.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
 	{ XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f), XMMatrixIdentity(), false, false }
 };
+
+Light g_Lights[2] = { 
+	{ XMFLOAT4(2.0f, 2.0f, 2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) },
+	{ XMFLOAT4(-2.0f, 2.0f, -2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) } };
 
 std::vector<CubeData*> g_TransparentObjects;
 std::vector<CubeData*> g_NonTransparentObjects;
@@ -250,13 +264,12 @@ HRESULT InitGraphics()
 		pBlob->Release();
 		return hr;
 	}
-
-	D3D11_INPUT_ELEMENT_DESC layoutDesc[] =
-		{
-			{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-			{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-		};
-	hr = g_pd3dDevice->CreateInputLayout(layoutDesc, 2, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &g_pCubeInputLayout);
+	D3D11_INPUT_ELEMENT_DESC layoutDesc[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+	};
+	hr = g_pd3dDevice->CreateInputLayout(layoutDesc, 3, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &g_pCubeInputLayout);
 	pBlob->Release();
 	if (FAILED(hr))
 		return hr;
@@ -371,17 +384,20 @@ HRESULT InitGraphics()
 	if (FAILED(hr)) { pBlob->Release(); return hr; }
 
 	D3D11_INPUT_ELEMENT_DESC layoutColorDesc[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
-	hr = g_pd3dDevice->CreateInputLayout(layoutColorDesc, 1, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &g_pColorCubeInputLayout);
+	hr = g_pd3dDevice->CreateInputLayout(layoutColorDesc, 2, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &g_pColorCubeInputLayout);
 	pBlob->Release();
-	if (FAILED(hr)) return hr;
+	if (FAILED(hr)) 
+		return hr;
 
 	hr = CompileShaderFromFile(const_cast<wchar_t*>(L"transparent.fx"), "PS", "ps_4_0", &pBlob);
 	if (FAILED(hr)) return hr;
 	hr = g_pd3dDevice->CreatePixelShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &g_pColorCubePS);
 	pBlob->Release();
-	if (FAILED(hr)) return hr;
+	if (FAILED(hr)) 
+		return hr;
 
 	bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
@@ -422,6 +438,20 @@ HRESULT InitGraphics()
 	g_Cubes[1].modelMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f);
 	g_Cubes[2].modelMatrix = XMMatrixTranslation(2.0f, 0.0f, 0.0f);
 	g_Cubes[3].modelMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
+
+	D3D11_BUFFER_DESC lightBufferDesc = {};
+	lightBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+	lightBufferDesc.ByteWidth = sizeof(Light) * 2;
+	lightBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	lightBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	hr = g_pd3dDevice->CreateBuffer(&lightBufferDesc, nullptr, &g_pLightBuffer);
+
+	D3D11_BUFFER_DESC cameraBufferDesc = {};
+	cameraBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+	cameraBufferDesc.ByteWidth = sizeof(XMFLOAT4);
+	cameraBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	cameraBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	hr = g_pd3dDevice->CreateBuffer(&cameraBufferDesc, nullptr, &g_pCameraBuffer);
 
 	return S_OK;
 }
@@ -521,6 +551,8 @@ void CleanupDevice()
 	if (g_pTransparentDepthState) g_pTransparentDepthState->Release();
 	if (g_pTransparentDepthStencilState) g_pTransparentDepthStencilState->Release();
 	if (g_pTransparentBlendState) g_pTransparentBlendState->Release();
+	if (g_pLightBuffer) g_pLightBuffer->Release();
+	if (g_pCameraBuffer) g_pCameraBuffer->Release();
 }
 
 void SkyboxRender()
@@ -589,7 +621,10 @@ void PrepareTextureCube(CubeData* cube)
 
 	XMMATRIX modelT = XMMatrixTranspose(cube->modelMatrix);
 	g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
-	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);
+	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);    
+	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);       
+	g_pImmediateContext->PSSetConstantBuffers(2, 1, &g_pLightBuffer);        
+	g_pImmediateContext->PSSetConstantBuffers(3, 1, &g_pCameraBuffer);       
 }
 
 void PrepareColorCube(CubeData* cube)
@@ -601,8 +636,11 @@ void PrepareColorCube(CubeData* cube)
 	XMMATRIX modelT = XMMatrixTranspose(cube->modelMatrix);
 	g_pImmediateContext->UpdateSubresource(g_pColorCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
 	g_pImmediateContext->UpdateSubresource(g_pColorCubeColorBuffer, 0, nullptr, &(cube->color), 0, 0);
-	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pColorCubeModelBuffer);
-	g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pColorCubeColorBuffer);
+	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pColorCubeModelBuffer); 
+	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);         
+	g_pImmediateContext->PSSetConstantBuffers(2, 1, &g_pColorCubeColorBuffer); 
+	g_pImmediateContext->PSSetConstantBuffers(3, 1, &g_pLightBuffer);          
+	g_pImmediateContext->PSSetConstantBuffers(4, 1, &g_pCameraBuffer);         
 }
 
 void DrawCube()
@@ -679,7 +717,6 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 }
 
 
-
 void Render() {
 	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
 	g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, Colors::MidnightBlue);
@@ -687,15 +724,27 @@ void Render() {
 
 	XMMATRIX view, proj;
 	XMVECTOR camPos = UpdateCamera(view, proj);
+	XMStoreFloat3(&g_CameraPos, camPos);
+
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pCameraBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+		memcpy(mapped.pData, &g_CameraPos, sizeof(XMFLOAT3));
+		g_pImmediateContext->Unmap(g_pCameraBuffer, 0);
+	}
+
 
 	XMMATRIX viewSkybox = view;
 	viewSkybox.r[3] = XMVectorSet(0, 0, 0, 1);
 	XMMATRIX vpSkybox = XMMatrixTranspose(viewSkybox * proj);
 
-	D3D11_MAPPED_SUBRESOURCE mapped;
 	if (SUCCEEDED(g_pImmediateContext->Map(g_pSkyboxVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 		memcpy(mapped.pData, &vpSkybox, sizeof(XMMATRIX));
 		g_pImmediateContext->Unmap(g_pSkyboxVPBuffer, 0);
+	}
+
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pLightBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+		memcpy(mapped.pData, g_Lights, sizeof(Light) * 2);
+		g_pImmediateContext->Unmap(g_pLightBuffer, 0);
 	}
 
 	SetupSkyboxStates();
