@@ -38,6 +38,7 @@ ID3D11BlendState* g_pBlendState = nullptr;
 ID3D11DepthStencilState* g_pTransparentDepthState = nullptr;
 ID3D11DepthStencilState* g_pTransparentDepthStencilState = nullptr;
 ID3D11BlendState* g_pTransparentBlendState = nullptr;
+ID3D11ShaderResourceView* g_pCubeNormalMapRV = nullptr;
 
 float g_CubeAngle = 0.0f;
 float g_CameraAngle = 0.0f;
@@ -78,16 +79,25 @@ struct modelData {
 	XMMATRIX normalMatrix;
 } ;
 
+Light g_Lights[2] = {
+	{ XMFLOAT4(2.0f, 2.0f, 2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) },
+	{ XMFLOAT4(0.0f, 2.0f, -2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) } };
+
+
 std::vector<CubeData> g_Cubes = {
 	{ XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMMatrixTranslation(0.0f, 0.0f, 0.0f), false, true},
 	{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
 	{ XMFLOAT4(0.0f, 1.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
-	{ XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f), XMMatrixIdentity(), false, false }
+	{ XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f), XMMatrixIdentity(), false, false },
+		{ XMFLOAT4(g_Lights[0].Color.x, g_Lights[0].Color.y, g_Lights[0].Color.z, 1.0f),
+	  XMMatrixScaling(0.2f, 0.2f, 0.2f)* XMMatrixTranslation(g_Lights[0].Position.x, g_Lights[0].Position.y, g_Lights[0].Position.z),
+	  false, false },
+
+	{ XMFLOAT4(g_Lights[1].Color.x, g_Lights[1].Color.y, g_Lights[1].Color.z, 1.0f),
+	  XMMatrixScaling(0.2f, 0.2f, 0.2f) * XMMatrixTranslation(g_Lights[1].Position.x, g_Lights[1].Position.y, g_Lights[1].Position.z),
+	  false, false }
 };
 
-Light g_Lights[2] = { 
-	{ XMFLOAT4(2.0f, 2.0f, 2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) },
-	{ XMFLOAT4(-2.0f, 2.0f, -2.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.1f, 0.01f, 0.0f) } };
 
 std::vector<CubeData*> g_TransparentObjects;
 std::vector<CubeData*> g_NonTransparentObjects;
@@ -272,9 +282,10 @@ HRESULT InitGraphics()
 	D3D11_INPUT_ELEMENT_DESC layoutDesc[] = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 36, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
-	hr = g_pd3dDevice->CreateInputLayout(layoutDesc, 3, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &g_pCubeInputLayout);
+	hr = g_pd3dDevice->CreateInputLayout(layoutDesc, 4, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &g_pCubeInputLayout);
 	pBlob->Release();
 	if (FAILED(hr))
 		return hr;
@@ -319,6 +330,10 @@ HRESULT InitGraphics()
 	hr = CreateDDSTextureFromFile(g_pd3dDevice, L"cube.dds", nullptr, &g_pCubeTextureRV);
 	if (FAILED(hr))
 		return hr;
+	hr = CreateDDSTextureFromFile(g_pd3dDevice, L"cube_normal.dds", nullptr, &g_pCubeNormalMapRV);
+	if (FAILED(hr)) 
+		return hr;
+
 	D3D11_SAMPLER_DESC sampDesc = {};
 	sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
 	sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -558,6 +573,7 @@ void CleanupDevice()
 	if (g_pTransparentBlendState) g_pTransparentBlendState->Release();
 	if (g_pLightBuffer) g_pLightBuffer->Release();
 	if (g_pCameraBuffer) g_pCameraBuffer->Release();
+	if (g_pCubeNormalMapRV) g_pCubeNormalMapRV->Release();
 }
 
 void SkyboxRender()
@@ -633,7 +649,8 @@ void PrepareTextureCube(CubeData* cube)
 	g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
 	g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
 	g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
-	g_pImmediateContext->PSSetShaderResources(0, 1, &g_pCubeTextureRV);
+	ID3D11ShaderResourceView* textures[2] = { g_pCubeTextureRV, g_pCubeNormalMapRV };
+	g_pImmediateContext->PSSetShaderResources(0, 2, textures);
 	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
 
 	modelData data = prepareModelData(cube);

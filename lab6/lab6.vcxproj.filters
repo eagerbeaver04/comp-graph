@@ -61,5 +61,6 @@
     <CopyFileToFolders Include="cube.dds" />
     <CopyFileToFolders Include="skybox.dds" />
     <CopyFileToFolders Include="transparent.fx" />
+    <CopyFileToFolders Include="cube_normal.dds" />
   </ItemGroup>
 </Project>

@@ -146,6 +146,7 @@
   </ItemGroup>
   <ItemGroup>
     <CopyFileToFolders Include="cube.dds" />
+    <CopyFileToFolders Include="cube_normal.dds" />
     <Image Include="lab6.ico" />
     <CopyFileToFolders Include="skybox.dds" />
     <Image Include="small.ico" />

@@ -68,7 +68,7 @@ float4 PS(PS_INPUT input) : SV_Target
                                   Lights[i].attenuation.y * distance +
                                   Lights[i].attenuation.z * distance * distance);
 
-        float diff = max(dot(input.normal, lightDir), 0.0);
+        float diff = saturate(dot(input.normal, lightDir));
         diffuse += Lights[i].color.rgb * diff * attenuation;
     }
 
