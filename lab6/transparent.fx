@@ -1,6 +1,7 @@
 cbuffer ModelBuffer : register(b0)
 {
     matrix m;
+    matrix normal_m;
 };
 
 cbuffer VPBuffer : register(b1)
@@ -16,9 +17,9 @@ cbuffer ColorBuffer : register(b2)
 cbuffer LightBuffer : register(b3)
 {
     struct Light {
-        float4 Position;
-        float4 Color;
-        float4 Attenuation;
+        float4 position;
+        float4 color;
+        float4 attenuation;
     } Lights[2];
 };
 
@@ -46,7 +47,7 @@ PS_INPUT VS(VS_INPUT input)
     float4 worldPos = mul(float4(input.pos, 1.0), m);
     output.worldPos = worldPos.xyz;
     output.pos = mul(worldPos, vp);
-    output.normal = mul(input.normal, (float3x3)m);
+    output.normal = mul(input.normal, (float3x3)normal_m);
     return output;
 }
 
@@ -59,16 +60,16 @@ float4 PS(PS_INPUT input) : SV_Target
     float3 diffuse = float3(0, 0, 0);
     for (int i = 0; i < 2; i++)
     {
-        float3 lightDir = Lights[i].Position.xyz - input.worldPos;
+        float3 lightDir = Lights[i].position.xyz - input.worldPos;
         float distance = length(lightDir);
         lightDir = normalize(lightDir);
 
-        float attenuation = 1.0 / (Lights[i].Attenuation.x +
-                                  Lights[i].Attenuation.y * distance +
-                                  Lights[i].Attenuation.z * distance * distance);
+        float attenuation = 1.0 / (Lights[i].attenuation.x +
+                                  Lights[i].attenuation.y * distance +
+                                  Lights[i].attenuation.z * distance * distance);
 
         float diff = max(dot(input.normal, lightDir), 0.0);
-        diffuse += Lights[i].Color.rgb * diff * attenuation;
+        diffuse += Lights[i].color.rgb * diff * attenuation;
     }
 
     float3 result = (ambient + diffuse) * color.rgb;

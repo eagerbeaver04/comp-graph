@@ -73,6 +73,11 @@ struct CubeData {
 	bool isTextured;
 };
 
+struct modelData {
+	XMMATRIX model;
+	XMMATRIX normalMatrix;
+} ;
+
 std::vector<CubeData> g_Cubes = {
 	{ XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMMatrixTranslation(0.0f, 0.0f, 0.0f), false, true},
 	{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
@@ -295,7 +300,7 @@ HRESULT InitGraphics()
 		return hr;
 
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(XMMATRIX);
+	bd.ByteWidth = 2 * sizeof(XMMATRIX);
 	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	bd.CPUAccessFlags = 0;
 	hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pCubeModelBuffer);
@@ -401,7 +406,7 @@ HRESULT InitGraphics()
 
 	bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(XMMATRIX);
+	bd.ByteWidth = 2 * sizeof(XMMATRIX);
 	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pColorCubeModelBuffer);
 	if (FAILED(hr)) return hr;
@@ -611,6 +616,18 @@ void SetupSkyboxStates()
 	}
 }
 
+modelData prepareModelData(CubeData* cube)
+{
+	XMMATRIX modelMatrix = cube->modelMatrix;
+
+	XMMATRIX invTransposeModel = XMMatrixInverse(nullptr, modelMatrix);
+	XMMATRIX normalT = XMMatrixTranspose(invTransposeModel);
+
+	XMMATRIX modelT = XMMatrixTranspose(modelMatrix);
+
+	return { modelT,normalT };
+}
+
 void PrepareTextureCube(CubeData* cube)
 {
 	g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
@@ -619,8 +636,8 @@ void PrepareTextureCube(CubeData* cube)
 	g_pImmediateContext->PSSetShaderResources(0, 1, &g_pCubeTextureRV);
 	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
 
-	XMMATRIX modelT = XMMatrixTranspose(cube->modelMatrix);
-	g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
+	modelData data = prepareModelData(cube);
+	g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr, &data, 0, 0);
 	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);    
 	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);       
 	g_pImmediateContext->PSSetConstantBuffers(2, 1, &g_pLightBuffer);        
@@ -633,8 +650,8 @@ void PrepareColorCube(CubeData* cube)
 	g_pImmediateContext->VSSetShader(g_pColorCubeVS, nullptr, 0);
 	g_pImmediateContext->PSSetShader(g_pColorCubePS, nullptr, 0);
 
-	XMMATRIX modelT = XMMatrixTranspose(cube->modelMatrix);
-	g_pImmediateContext->UpdateSubresource(g_pColorCubeModelBuffer, 0, nullptr, &modelT, 0, 0);
+	modelData data = prepareModelData(cube);
+	g_pImmediateContext->UpdateSubresource(g_pColorCubeModelBuffer, 0, nullptr, &data, 0, 0);
 	g_pImmediateContext->UpdateSubresource(g_pColorCubeColorBuffer, 0, nullptr, &(cube->color), 0, 0);
 	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pColorCubeModelBuffer); 
 	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);         
