@@ -2,9 +2,11 @@
 #include <directxcolors.h>
 #include "DDSTextureLoader.h"
 #include "vertices.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_win32.h"
+#include "imgui/imgui_impl_dx11.h"
 #include <vector>
 #include <algorithm>
-
 using namespace DirectX;
 
 ID3D11Device *g_pd3dDevice = nullptr;
@@ -66,6 +68,7 @@ void Render();
 
 const std::wstring windowTitle = L"Mikhail Markov";
 const std::wstring windowClass = L"MikhailMarkovClass";
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 struct CubeData {
 	XMFLOAT4 color;
@@ -468,11 +471,24 @@ HRESULT InitGraphics()
 	cameraBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	hr = g_pd3dDevice->CreateBuffer(&cameraBufferDesc, nullptr, &g_pCameraBuffer);
 
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+
+	ImGui::StyleColorsDark();
+
+	ImGui_ImplWin32_Init(FindWindow(windowClass.c_str(), windowTitle.c_str()));
+
+	ImGui_ImplDX11_Init(g_pd3dDevice, g_pImmediateContext);
+
 	return S_OK;
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+		return true;
+
 	switch (message)
 	{
 	case WM_LBUTTONDOWN:
@@ -515,6 +531,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 void CleanupDevice()
 {
+	ImGui_ImplDX11_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+
 	if (g_pImmediateContext)
 		g_pImmediateContext->ClearState();
 
@@ -778,6 +798,23 @@ void Render() {
 	g_pImmediateContext->RSSetState(nullptr);
 
 	RenderCubes(view, proj, camPos);
+
+	ImGui_ImplDX11_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(60, 40), ImGuiCond_FirstUseEver);
+
+	ImGui::Begin("Options");
+	//ImGui::Checkbox("Grayscale Filter", &g_EnablePostProcessFilter);
+	//ImGui::Checkbox("Frustum Culling", &g_EnableFrustumCulling);
+	//ImGui::Text("Total cubes: %d", g_totalInstances);
+	//ImGui::Text("Visible cubes: %d", g_finalInstanceCount);
+	ImGui::End();
+
+	ImGui::Render();
+
+	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
 	g_pSwapChain->Present(1, 0);
 }
