@@ -41,6 +41,8 @@ ID3D11DepthStencilState* g_pTransparentDepthState = nullptr;
 ID3D11DepthStencilState* g_pTransparentDepthStencilState = nullptr;
 ID3D11BlendState* g_pTransparentBlendState = nullptr;
 ID3D11ShaderResourceView* g_pCubeNormalMapRV = nullptr;
+ID3D11Buffer* g_pCubeIndexBuffer = nullptr;
+ID3D11Buffer* g_pSkyboxIndexBuffer = nullptr;
 
 float g_CubeAngle = 0.0f;
 float g_CameraAngle = 0.0f;
@@ -96,6 +98,54 @@ std::vector<CubeData> g_Cubes = {
 	  false, false }
 };
 
+struct Plane
+{
+	float a, b, c, d;
+};
+
+void ExtractFrustumPlanes(const XMMATRIX& M, Plane planes[6])
+{
+	planes[0].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[0];
+	planes[0].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[0];
+	planes[0].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[0];
+	planes[0].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[0];
+
+	planes[1].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[0];
+	planes[1].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[0];
+	planes[1].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[0];
+	planes[1].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[0];
+
+	planes[2].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[1];
+	planes[2].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[1];
+	planes[2].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[1];
+	planes[2].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[1];
+
+	planes[3].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[1];
+	planes[3].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[1];
+	planes[3].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[1];
+	planes[3].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[1];
+
+	planes[4].a = M.r[0].m128_f32[2];
+	planes[4].b = M.r[1].m128_f32[2];
+	planes[4].c = M.r[2].m128_f32[2];
+	planes[4].d = M.r[3].m128_f32[2];
+
+	planes[5].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[2];
+	planes[5].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[2];
+	planes[5].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[2];
+	planes[5].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[2];
+}
+
+bool IsSphereInFrustum(const Plane planes[6], const XMVECTOR& center, float radius)
+{
+	for (int i = 0; i < 6; i++)
+	{
+		float distance = XMVectorGetX(XMVector3Dot(center, XMVectorSet(planes[i].a, planes[i].b, planes[i].c, 0.0f))) + planes[i].d;
+		if (distance < -radius)
+			return false;
+	}
+	return true;
+}
 
 std::vector<CubeData*> g_TransparentObjects;
 std::vector<CubeData*> g_NonTransparentObjects;
@@ -332,6 +382,17 @@ HRESULT InitGraphics()
 	if (FAILED(hr)) 
 		return hr;
 
+	D3D11_BUFFER_DESC ibd = {};
+	ibd.Usage = D3D11_USAGE_DEFAULT;
+	ibd.ByteWidth = sizeof(WORD) * 36;
+	ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	ibd.CPUAccessFlags = 0;
+	D3D11_SUBRESOURCE_DATA iinitData = {};
+	iinitData.pSysMem = Vertices::g_CubeIndices;
+	hr = g_pd3dDevice->CreateBuffer(&ibd, &iinitData, &g_pCubeIndexBuffer);
+	if (FAILED(hr))
+		return hr;
+
 	D3D11_SAMPLER_DESC sampDesc = {};
 	sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
 	sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -391,6 +452,12 @@ HRESULT InitGraphics()
 		return hr;
 
 	hr = CreateDDSTextureFromFile(g_pd3dDevice, L"skybox.dds", nullptr, &g_pSkyboxTextureRV);
+	if (FAILED(hr))
+		return hr;
+
+	ibd.ByteWidth = sizeof(WORD) * 36;
+	iinitData.pSysMem = Vertices::g_SkyboxIndices;
+	hr = g_pd3dDevice->CreateBuffer(&ibd, &iinitData, &g_pSkyboxIndexBuffer);
 	if (FAILED(hr))
 		return hr;
 
@@ -589,6 +656,8 @@ void CleanupDevice()
 	if (g_pLightBuffer) g_pLightBuffer->Release();
 	if (g_pCameraBuffer) g_pCameraBuffer->Release();
 	if (g_pCubeNormalMapRV) g_pCubeNormalMapRV->Release();
+	if (g_pCubeIndexBuffer) g_pCubeIndexBuffer->Release();
+	if (g_pSkyboxIndexBuffer) g_pSkyboxIndexBuffer->Release();
 }
 
 void SkyboxRender()
@@ -596,6 +665,7 @@ void SkyboxRender()
 	UINT stride = sizeof(SkyboxVertex);
 	UINT offset = 0;
 	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pSkyboxVertexBuffer, &stride, &offset);
+	g_pImmediateContext->IASetIndexBuffer(g_pSkyboxIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 	g_pImmediateContext->IASetInputLayout(g_pSkyboxInputLayout);
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	g_pImmediateContext->VSSetShader(g_pSkyboxVS, nullptr, 0);
@@ -603,7 +673,7 @@ void SkyboxRender()
 	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pSkyboxVPBuffer);
 	g_pImmediateContext->PSSetShaderResources(0, 1, &g_pSkyboxTextureRV);
 	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
-	g_pImmediateContext->Draw(36, 0);
+	g_pImmediateContext->DrawIndexed(36, 0, 0);;
 }
 
 XMVECTOR UpdateCamera(XMMATRIX& view, XMMATRIX& proj)
@@ -694,9 +764,10 @@ void DrawCube()
 	UINT stride = sizeof(SimpleVertex);
 	UINT offset = 0;
 	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
+	g_pImmediateContext->IASetIndexBuffer(g_pCubeIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	g_pImmediateContext->Draw(36, 0);
+	g_pImmediateContext->DrawIndexed(36, 0, 0);
 }
 
 template<typename F>

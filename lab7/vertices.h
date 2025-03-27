@@ -26,8 +26,10 @@ struct SkyboxVertex
 
 struct Vertices
 {
-	static SimpleVertex g_CubeVertices[];
+    static SimpleVertex g_CubeVertices[];
     static SkyboxVertex g_SkyboxVertices[];
+    static WORD g_CubeIndices[];
+    static WORD g_SkyboxIndices[];
 };
 
 SimpleVertex Vertices::g_CubeVertices[] = {
@@ -117,4 +119,22 @@ SkyboxVertex Vertices::g_SkyboxVertices[] =
     { { -1.0f, -1.0f,  1.0f } },
     { {  1.0f, -1.0f, -1.0f } },
     { {  1.0f, -1.0f,  1.0f } },
+};
+
+WORD Vertices::g_CubeIndices[] = {
+    0, 1, 2, 3, 4, 5,       
+    6, 7, 8, 9, 10, 11,     
+    12, 13, 14, 15, 16, 17, 
+    18, 19, 20, 21, 22, 23, 
+    24, 25, 26, 27, 28, 29, 
+    30, 31, 32, 33, 34, 35  
+};
+
+WORD Vertices::g_SkyboxIndices[] = {
+    0, 1, 2, 3, 4, 5,       
+    6, 7, 8, 9, 10, 11,     
+    12, 13, 14, 15, 16, 17, 
+    18, 19, 20, 21, 22, 23, 
+    24, 25, 26, 27, 28, 29, 
+    30, 31, 32, 33, 34, 35  
 };
