@@ -78,6 +78,7 @@ struct CubeData {
 	XMMATRIX modelMatrix;
 	bool isTransparent;
 	bool isTextured;
+	int textureIndex = 0;
 };
 
 Light g_Lights[2] = {
@@ -99,6 +100,17 @@ std::vector<CubeData> g_Cubes = {
 	  false, false }
 };
 
+struct InstanceData {
+	XMMATRIX modelMatrix;
+	int textureIndex;
+	XMFLOAT3 padding;
+};
+
+// Глобальные переменные
+const int MAX_INSTANCES = 100; // Максимум инстансов
+ID3D11Buffer* g_pInstanceCB = nullptr;
+std::vector<InstanceData> g_Instances;
+std::vector<ID3D11ShaderResourceView*> g_CubeTextures;
 struct Plane
 {
 	float a, b, c, d;
@@ -444,6 +456,12 @@ HRESULT InitGraphics()
 	hr = CreateDDSTextureFromFile(g_pd3dDevice, L"cube.dds", nullptr, &g_pCubeTextureRV);
 	if (FAILED(hr))
 		return hr;
+	ID3D11ShaderResourceView* tex1, * tex2;
+	CreateDDSTextureFromFile(g_pd3dDevice, L"texture1.dds", nullptr, &tex1);
+	CreateDDSTextureFromFile(g_pd3dDevice, L"texture2.dds", nullptr, &tex2);
+	g_CubeTextures.push_back(g_pCubeTextureRV);
+	g_CubeTextures.push_back(tex1);
+	g_CubeTextures.push_back(tex2);
 	hr = CreateDDSTextureFromFile(g_pd3dDevice, L"cube_normal.dds", nullptr, &g_pCubeNormalMapRV);
 	if (FAILED(hr)) 
 		return hr;
@@ -671,6 +689,15 @@ HRESULT InitGraphics()
 	if (FAILED(hr))
 		return hr;
 
+	D3D11_BUFFER_DESC cbDesc = { 0 };
+	cbDesc.ByteWidth = sizeof(InstanceData) * MAX_INSTANCES;
+	cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+	cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	hr = g_pd3dDevice->CreateBuffer(&cbDesc, nullptr, &g_pInstanceCB);
+	if (FAILED(hr)) 
+		return hr;
+
 	InitImGui();
 
 	return S_OK;
@@ -742,8 +769,8 @@ void CleanupDevice()
 		g_pCubeModelBuffer->Release();
 	if (g_pCubeVPBuffer)
 		g_pCubeVPBuffer->Release();
-	if (g_pCubeTextureRV)
-		g_pCubeTextureRV->Release();
+	//if (g_pCubeTextureRV)
+	//	g_pCubeTextureRV->Release();
 	if (g_pSamplerLinear)
 		g_pSamplerLinear->Release();
 	if (g_pRenderTargetView)
@@ -790,6 +817,10 @@ void CleanupDevice()
 	if (g_pPostProcessPS) g_pPostProcessPS->Release();
 	if (g_pFullScreenVB) g_pFullScreenVB->Release();
 	if (g_pFullScreenLayout) g_pFullScreenLayout->Release();
+	for (auto& texture : g_CubeTextures) {
+		if (texture) texture->Release();
+	}
+	g_CubeTextures.clear();
 }
 
 void SkyboxRender()
@@ -858,23 +889,6 @@ XMMATRIX prepareModelData(CubeData* cube)
 	return modelT;
 }
 
-void PrepareTextureCube(CubeData* cube)
-{
-	g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
-	g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
-	g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
-	ID3D11ShaderResourceView* textures[2] = { g_pCubeTextureRV, g_pCubeNormalMapRV };
-	g_pImmediateContext->PSSetShaderResources(0, 2, textures);
-	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
-
-	XMMATRIX data = prepareModelData(cube);
-	g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr, &data, 0, 0);
-	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);    
-	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);       
-	g_pImmediateContext->PSSetConstantBuffers(2, 1, &g_pLightBuffer);        
-	g_pImmediateContext->PSSetConstantBuffers(3, 1, &g_pCameraBuffer);       
-}
-
 void PrepareColorCube(CubeData* cube)
 {
 	g_pImmediateContext->IASetInputLayout(g_pColorCubeInputLayout);
@@ -902,13 +916,28 @@ void DrawCube()
 	g_pImmediateContext->DrawIndexed(36, 0, 0);
 }
 
+void DrawInstancedCubes() {
+	ID3D11ShaderResourceView* textures[] = {
+	g_CubeTextures[0],
+	g_CubeTextures[1],
+	g_CubeTextures[2],
+	g_pCubeNormalMapRV // Нормалмап
+	};
+	g_pImmediateContext->PSSetShaderResources(0, sizeof(textures), textures);
+	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
+	UINT stride = sizeof(SimpleVertex);
+	UINT offset = 0;
+	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
+	g_pImmediateContext->IASetIndexBuffer(g_pCubeIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
+	g_pImmediateContext->VSSetConstantBuffers(2, 1, &g_pInstanceCB); // Правильный слот b2
+	g_pImmediateContext->PSSetShaderResources(0, g_CubeTextures.size(), g_CubeTextures.data());
+	g_pImmediateContext->DrawIndexedInstanced(36, g_Instances.size(), 0, 0, 0);
+}
+
 template<typename F>
 void RenderCube(CubeData* cube, F&& postPrepareFunc)
 {
-	if (cube->isTextured) 
-		PrepareTextureCube(cube);
-	else 
-		PrepareColorCube(cube);
+	PrepareColorCube(cube);
 	postPrepareFunc();
 	DrawCube();
 }
@@ -951,49 +980,155 @@ void ExecutePostProcessingPass() {
 	g_pImmediateContext->PSSetShaderResources(0, 1, nullSRV);
 }
 
-void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos) {
+void PrepareInstancedRendering() {
+	g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
+	g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
+	g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
+
+	g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
+	g_pImmediateContext->VSSetConstantBuffers(2, 1, &g_pInstanceCB);
+
+	g_pImmediateContext->PSSetConstantBuffers(3, 1, &g_pLightBuffer);
+	g_pImmediateContext->PSSetConstantBuffers(4, 1, &g_pCameraBuffer);
+}
+void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
+{
 	XMMATRIX vp = XMMatrixTranspose(view * proj);
 
+	// Обновляем VP буфер
 	D3D11_MAPPED_SUBRESOURCE mapped;
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+	{
 		memcpy(mapped.pData, &vp, sizeof(XMMATRIX));
 		g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
 	}
-	static float cubeAngle = 0.0f;
-	cubeAngle += 0.005f;
 
-	const float zAmplitude = 3.0f;
-	const float zFrequency = 0.8f;
-
-	float z = zAmplitude * sinf(cubeAngle * zFrequency);
-
-	g_Cubes[0].modelMatrix = XMMatrixTranslation(0.0f, 0.0f, z) *
-		XMMatrixRotationZ(cubeAngle * 2.5f);
-
+	// Подготовка данных для инстансинга (только для текстурированных кубов)
 	g_TransparentObjects.clear();
 	g_NonTransparentObjects.clear();
+	g_Instances.clear();
 
-	for (auto& cube : g_Cubes)
-		if (cube.isTransparent)
-			g_TransparentObjects.push_back(&cube);
-		else
-			g_NonTransparentObjects.push_back(&cube);
-	
-	SortTransparentObjects(cameraPos, g_TransparentObjects);
+	// 1. Создаем 10 вращающихся текстурированных кубов по кольцу (для инстансинга)
+	static float rotationAngle = 0.0f;
+	rotationAngle += 0.005f;
 
-	for (auto& cube : g_NonTransparentObjects) {
-		RenderCube(cube, []() {g_pImmediateContext->OMSetBlendState(nullptr, nullptr, 0xffffffff);
-		g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);});
-	}
-	for (auto& cube : g_TransparentObjects) 
+	const float radius = 3.0f;
+	const int cubeCount = 10;
+
+	for (int i = 0; i < cubeCount; i++)
 	{
-		RenderCube(cube, []() {
-			float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-			g_pImmediateContext->OMSetBlendState(g_pTransparentBlendState, blendFactor, 0xffffffff);
-			g_pImmediateContext->OMSetDepthStencilState(g_pTransparentDepthState, 0);});
-	}
-}
+		float angle = XM_2PI * i / cubeCount + rotationAngle;
+		float x = radius * cosf(angle);
+		float z = radius * sinf(angle);
 
+		XMMATRIX world = XMMatrixScaling(0.5f, 0.5f, 0.5f) *
+			XMMatrixRotationY(angle) *
+			XMMatrixTranslation(x, 0.0f, z);
+
+		XMMATRIX invWorld = XMMatrixInverse(nullptr, world);
+		XMMATRIX normalMatrix = XMMatrixTranspose(invWorld);
+
+		InstanceData data;
+		data.modelMatrix = XMMatrixTranspose(world);
+		//data.normalMatrix = normalMatrix;
+		data.textureIndex = i % g_CubeTextures.size(); // Циклически меняем текстуры
+
+		g_Instances.push_back(data);
+	}
+
+	// 2. Добавляем оригинальные кубы из g_Cubes (прозрачные, световые и т.д.)
+	for (auto& cube : g_Cubes)
+	{
+		if (cube.isTextured)
+		{
+			// Для оригинальных текстурированных кубов тоже добавляем в инстансы
+			XMMATRIX invModel = XMMatrixInverse(nullptr, cube.modelMatrix);
+			InstanceData data;
+			data.modelMatrix = XMMatrixTranspose(cube.modelMatrix);
+/*			data.normalMatrix = XMMatrixTranspose(invModel)*/;
+			data.textureIndex = cube.textureIndex;
+			g_Instances.push_back(data);
+		}
+		else
+		{
+			// Не текстурированные объекты (цветные)
+			if (cube.isTransparent)
+			{
+				g_TransparentObjects.push_back(&cube);
+			}
+			else
+			{
+				g_NonTransparentObjects.push_back(&cube);
+			}
+		}
+	}
+
+	// Обновляем буфер инстансов
+	if (!g_Instances.empty())
+	{
+		if (SUCCEEDED(g_pImmediateContext->Map(g_pInstanceCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+		{
+			memcpy(mapped.pData, g_Instances.data(), sizeof(InstanceData) * g_Instances.size());
+			g_pImmediateContext->Unmap(g_pInstanceCB, 0);
+		}
+	}
+
+	// Рендеринг инстансированных объектов (все текстурированные кубы)
+	if (!g_Instances.empty())
+	{
+		// Настройка состояния рендера
+		g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
+		g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
+		g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
+
+		// Привязка константных буферов
+		g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);
+		g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
+		g_pImmediateContext->VSSetConstantBuffers(2, 1, &g_pInstanceCB);
+
+		// Привязка текстур
+		ID3D11ShaderResourceView* textures[] = {
+			g_CubeTextures[0],
+			g_CubeTextures[1],
+			g_CubeTextures[2],
+			g_pCubeNormalMapRV
+		};
+		g_pImmediateContext->PSSetShaderResources(0, 4, textures);
+		g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
+
+		// Отрисовка инстансов
+		UINT stride = sizeof(SimpleVertex);
+		UINT offset = 0;
+		g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
+		g_pImmediateContext->IASetIndexBuffer(g_pCubeIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
+		g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		g_pImmediateContext->DrawIndexedInstanced(36, static_cast<UINT>(g_Instances.size()), 0, 0, 0);
+	}
+
+	// Рендеринг неинстансированных непрозрачных объектов (цветные кубы)
+	for (auto& cube : g_NonTransparentObjects)
+	{
+		PrepareColorCube(cube);
+		g_pImmediateContext->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+		g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
+		DrawCube();
+	}
+
+	// Рендеринг прозрачных объектов
+	float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	g_pImmediateContext->OMSetBlendState(g_pTransparentBlendState, blendFactor, 0xffffffff);
+	g_pImmediateContext->OMSetDepthStencilState(g_pTransparentDepthState, 0);
+
+	for (auto& cube : g_TransparentObjects)
+	{
+		PrepareColorCube(cube);
+		DrawCube();
+	}
+
+	// Обновление счетчиков для UI
+	g_totalInstances = static_cast<int>(g_Instances.size() + g_NonTransparentObjects.size() + g_TransparentObjects.size());
+	g_finalInstanceCount = static_cast<int>(g_Instances.size());
+}
 
 void RenderImGui()
 {
