@@ -50,6 +50,7 @@ bool g_MouseDragging = false;
 POINT g_LastMousePos = {0, 0};
 float g_CameraAzimuth = 0.0f;
 float g_CameraElevation = 0.0f;
+const float g_ClearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f };
 
 struct Light {
 	XMFLOAT4 Position;
@@ -103,6 +104,18 @@ struct Plane
 	float a, b, c, d;
 };
 
+struct FullScreenVertex {
+	float x, y, z, w;
+	float u, v;
+};
+
+FullScreenVertex g_FullScreenTriangle[3] = {
+	{ -1.0f, -1.0f, 0, 1,   0.0f, 1.0f },
+	{ -1.0f,  3.0f, 0, 1,   0.0f,-1.0f },
+	{  3.0f, -1.0f, 0, 1,   2.0f, 1.0f }
+};
+
+
 void ExtractFrustumPlanes(const XMMATRIX& M, Plane planes[6])
 {
 	planes[0].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[0];
@@ -146,6 +159,19 @@ bool IsSphereInFrustum(const Plane planes[6], const XMVECTOR& center, float radi
 	}
 	return true;
 }
+
+bool g_EnablePostProcessFilter = false;
+ID3D11Texture2D* g_pPostProcessTex = nullptr;
+ID3D11RenderTargetView* g_pPostProcessRTV = nullptr;
+ID3D11ShaderResourceView* g_pPostProcessSRV = nullptr;
+ID3D11VertexShader* g_pPostProcessVS = nullptr;
+ID3D11PixelShader* g_pPostProcessPS = nullptr;
+ID3D11Buffer* g_pFullScreenVB = nullptr;
+ID3D11InputLayout* g_pFullScreenLayout = nullptr;
+bool g_EnableFrustumCulling = false;
+
+int g_totalInstances = 0;
+int g_finalInstanceCount = 0;	
 
 std::vector<CubeData*> g_TransparentObjects;
 std::vector<CubeData*> g_NonTransparentObjects;
@@ -204,6 +230,20 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	ShowWindow(hWnd, nCmdShow);
 	UpdateWindow(hWnd);
 	return TRUE;
+}
+
+
+void InitImGui()
+{
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+
+	ImGui::StyleColorsDark();
+
+	ImGui_ImplWin32_Init(FindWindow(windowClass.c_str(), windowTitle.c_str()));
+
+	ImGui_ImplDX11_Init(g_pd3dDevice, g_pImmediateContext);
 }
 
 HRESULT InitDevice(HWND hWnd)
@@ -278,6 +318,32 @@ HRESULT InitDevice(HWND hWnd)
 	vp.TopLeftX = 0;
 	vp.TopLeftY = 0;
 	g_pImmediateContext->RSSetViewports(1, &vp);
+
+	width = rc.right - rc.left;
+	height = rc.bottom - rc.top;
+
+	D3D11_TEXTURE2D_DESC ppDesc = {};
+	ppDesc.Width = width;
+	ppDesc.Height = height;
+	ppDesc.MipLevels = 1;
+	ppDesc.ArraySize = 1;
+	ppDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	ppDesc.SampleDesc.Count = 1;
+	ppDesc.Usage = D3D11_USAGE_DEFAULT;
+	ppDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+	hr = g_pd3dDevice->CreateTexture2D(&ppDesc, nullptr, &g_pPostProcessTex);
+	if (FAILED(hr))
+		return hr;
+
+	hr = g_pd3dDevice->CreateRenderTargetView(g_pPostProcessTex, nullptr, &g_pPostProcessRTV);
+	if (FAILED(hr))
+		return hr;
+
+	hr = g_pd3dDevice->CreateShaderResourceView(g_pPostProcessTex, nullptr, &g_pPostProcessSRV);
+	if (FAILED(hr))
+		return hr;
+
 
 	return S_OK;
 }
@@ -538,15 +604,74 @@ HRESULT InitGraphics()
 	cameraBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	hr = g_pd3dDevice->CreateBuffer(&cameraBufferDesc, nullptr, &g_pCameraBuffer);
 
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO();
+	hr = CompileShaderFromFile(const_cast<wchar_t*>(L"post.fx"),
+		"VS",
+		"vs_4_0",
+		&pBlob);
 
-	ImGui::StyleColorsDark();
+	if (FAILED(hr))
+		return hr;
 
-	ImGui_ImplWin32_Init(FindWindow(windowClass.c_str(), windowTitle.c_str()));
+	hr = g_pd3dDevice->CreateVertexShader(
+		pBlob->GetBufferPointer(),
+		pBlob->GetBufferSize(),
+		nullptr,
+		&g_pPostProcessVS);
+	if (FAILED(hr))
+		return hr;
 
-	ImGui_ImplDX11_Init(g_pd3dDevice, g_pImmediateContext);
+	D3D11_INPUT_ELEMENT_DESC layoutDesc_[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, sizeof(float) * 4, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+	};
+
+	hr = g_pd3dDevice->CreateInputLayout(
+		layoutDesc_,
+		_countof(layoutDesc_),
+		pBlob->GetBufferPointer(),
+		pBlob->GetBufferSize(),
+		&g_pFullScreenLayout
+	);
+	if (FAILED(hr))
+		return hr;
+
+	pBlob->Release();
+	pBlob = nullptr;
+
+	hr = CompileShaderFromFile(const_cast<wchar_t*>(L"post.fx"),
+		"PS",
+		"ps_4_0",
+		&pBlob);
+	if (FAILED(hr))
+		return hr;
+
+	hr = g_pd3dDevice->CreatePixelShader(
+		pBlob->GetBufferPointer(),
+		pBlob->GetBufferSize(),
+		nullptr,
+		&g_pPostProcessPS
+	);
+
+	pBlob->Release();
+	pBlob = nullptr;
+
+	if (FAILED(hr))
+		return hr;
+
+	ibd = {};
+	ibd.Usage = D3D11_USAGE_DEFAULT;
+	ibd.ByteWidth = sizeof(FullScreenVertex) * 3;
+	ibd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	ibd.CPUAccessFlags = 0;
+
+	initData = {};
+	initData.pSysMem = g_FullScreenTriangle;
+
+	hr = g_pd3dDevice->CreateBuffer(&ibd, &initData, &g_pFullScreenVB);
+	if (FAILED(hr))
+		return hr;
+
+	InitImGui();
 
 	return S_OK;
 }
@@ -658,6 +783,13 @@ void CleanupDevice()
 	if (g_pCubeNormalMapRV) g_pCubeNormalMapRV->Release();
 	if (g_pCubeIndexBuffer) g_pCubeIndexBuffer->Release();
 	if (g_pSkyboxIndexBuffer) g_pSkyboxIndexBuffer->Release();
+	if (g_pPostProcessTex) g_pPostProcessTex->Release();
+	if (g_pPostProcessRTV) g_pPostProcessRTV->Release();
+	if (g_pPostProcessSRV) g_pPostProcessSRV->Release();
+	if (g_pPostProcessVS) g_pPostProcessVS->Release();
+	if (g_pPostProcessPS) g_pPostProcessPS->Release();
+	if (g_pFullScreenVB) g_pFullScreenVB->Release();
+	if (g_pFullScreenLayout) g_pFullScreenLayout->Release();
 }
 
 void SkyboxRender()
@@ -790,6 +922,35 @@ void SortTransparentObjects(XMVECTOR cameraPosition, std::vector<CubeData*>& tra
 
 }
 
+void PrepareRenderTarget(ID3D11RenderTargetView* rtv) {
+	g_pImmediateContext->OMSetRenderTargets(1, &rtv, g_pDepthStencilView);
+	g_pImmediateContext->ClearRenderTargetView(rtv, g_ClearColor);
+	g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+}
+
+// Executes post-processing pass
+void ExecutePostProcessingPass() {
+	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+	g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
+
+	const UINT stride = sizeof(FullScreenVertex);
+	const UINT offset = 0;
+	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pFullScreenVB, &stride, &offset);
+	g_pImmediateContext->IASetInputLayout(g_pFullScreenLayout);
+	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	g_pImmediateContext->VSSetShader(g_pPostProcessVS, nullptr, 0);
+	g_pImmediateContext->PSSetShader(g_pPostProcessPS, nullptr, 0);
+
+	g_pImmediateContext->PSSetShaderResources(0, 1, &g_pPostProcessSRV);
+	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
+
+	g_pImmediateContext->Draw(3, 0);
+
+	ID3D11ShaderResourceView* nullSRV[1] = { nullptr };
+	g_pImmediateContext->PSSetShaderResources(0, 1, nullSRV);
+}
+
 void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos) {
 	XMMATRIX vp = XMMatrixTranspose(view * proj);
 
@@ -834,6 +995,26 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 }
 
 
+void RenderImGui()
+{
+	ImGui_ImplDX11_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(60, 40), ImGuiCond_FirstUseEver);
+
+	ImGui::Begin("Options");
+	ImGui::Checkbox("Grayscale Filter", &g_EnablePostProcessFilter);
+	ImGui::Checkbox("Frustum Culling", &g_EnableFrustumCulling);
+	ImGui::Text("Total cubes: %d", g_totalInstances);
+	ImGui::Text("Visible cubes: %d", g_finalInstanceCount);
+	ImGui::End();
+
+	ImGui::Render();
+
+	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+}
+
 void Render() {
 	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
 	g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, Colors::MidnightBlue);
@@ -870,22 +1051,7 @@ void Render() {
 
 	RenderCubes(view, proj, camPos);
 
-	ImGui_ImplDX11_NewFrame();
-	ImGui_ImplWin32_NewFrame();
-	ImGui::NewFrame();
-	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSize(ImVec2(60, 40), ImGuiCond_FirstUseEver);
-
-	ImGui::Begin("Options");
-	//ImGui::Checkbox("Grayscale Filter", &g_EnablePostProcessFilter);
-	//ImGui::Checkbox("Frustum Culling", &g_EnableFrustumCulling);
-	//ImGui::Text("Total cubes: %d", g_totalInstances);
-	//ImGui::Text("Visible cubes: %d", g_finalInstanceCount);
-	ImGui::End();
-
-	ImGui::Render();
-
-	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+	RenderImGui();
 
 	g_pSwapChain->Present(1, 0);
 }

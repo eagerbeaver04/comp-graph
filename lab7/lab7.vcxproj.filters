@@ -65,7 +65,7 @@
     <ClCompile Include="DDSTextureLoader.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
-        <ClCompile Include="imgui/imgui.cpp">
+    <ClCompile Include="imgui/imgui.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
     <ClCompile Include="imgui/imgui_draw.cpp">
@@ -104,5 +104,6 @@
     <CopyFileToFolders Include="skybox.dds" />
     <CopyFileToFolders Include="transparent.fx" />
     <CopyFileToFolders Include="cube_normal.dds" />
+    <CopyFileToFolders Include="post.fx" />
   </ItemGroup>
 </Project>
