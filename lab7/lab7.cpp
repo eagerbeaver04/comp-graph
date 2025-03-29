@@ -88,9 +88,8 @@ Light g_Lights[2] = {
 
 std::vector<CubeData> g_Cubes = {
 	{ XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMMatrixTranslation(0.0f, 0.0f, 0.0f), false, true},
-	{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
+		{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
 	{ XMFLOAT4(0.0f, 1.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
-	{ XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f), XMMatrixIdentity(), false, false },
 		{ XMFLOAT4(g_Lights[0].Color.x, g_Lights[0].Color.y, g_Lights[0].Color.z, 1.0f),
 	  XMMatrixScaling(0.2f, 0.2f, 0.2f)* XMMatrixTranslation(g_Lights[0].Position.x, g_Lights[0].Position.y, g_Lights[0].Position.z),
 	  false, false },
@@ -457,8 +456,8 @@ HRESULT InitGraphics()
 	if (FAILED(hr))
 		return hr;
 	ID3D11ShaderResourceView* tex1, * tex2;
-	CreateDDSTextureFromFile(g_pd3dDevice, L"texture1.dds", nullptr, &tex1);
-	CreateDDSTextureFromFile(g_pd3dDevice, L"texture2.dds", nullptr, &tex2);
+	CreateDDSTextureFromFile(g_pd3dDevice, L"cube2.dds", nullptr, &tex1);
+	CreateDDSTextureFromFile(g_pd3dDevice, L"cube.dds", nullptr, &tex2);
 	g_CubeTextures.push_back(g_pCubeTextureRV);
 	g_CubeTextures.push_back(tex1);
 	g_CubeTextures.push_back(tex2);
@@ -603,10 +602,6 @@ HRESULT InitGraphics()
 	hr = g_pd3dDevice->CreateDepthStencilState(&depthDesc, &g_pTransparentDepthState);
 	if (FAILED(hr))
 		return hr;
-
-	g_Cubes[1].modelMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f);
-	g_Cubes[2].modelMatrix = XMMatrixTranslation(2.0f, 0.0f, 0.0f);
-	g_Cubes[3].modelMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
 
 	D3D11_BUFFER_DESC lightBufferDesc = {};
 	lightBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -923,7 +918,7 @@ void DrawInstancedCubes() {
 	g_CubeTextures[2],
 	g_pCubeNormalMapRV // Нормалмап
 	};
-	g_pImmediateContext->PSSetShaderResources(0, sizeof(textures), textures);
+	g_pImmediateContext->PSSetShaderResources(0, 4, textures);
 	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
 	UINT stride = sizeof(SimpleVertex);
 	UINT offset = 0;
@@ -994,6 +989,8 @@ void PrepareInstancedRendering() {
 void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 {
 	XMMATRIX vp = XMMatrixTranspose(view * proj);
+	g_Cubes[1].modelMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f);
+	g_Cubes[2].modelMatrix = XMMatrixTranslation(2.0f, 0.0f, 0.0f);
 
 	// Обновляем VP буфер
 	D3D11_MAPPED_SUBRESOURCE mapped;
@@ -1063,7 +1060,6 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 		}
 	}
 
-	// Обновляем буфер инстансов
 	if (!g_Instances.empty())
 	{
 		if (SUCCEEDED(g_pImmediateContext->Map(g_pInstanceCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
@@ -1071,11 +1067,8 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 			memcpy(mapped.pData, g_Instances.data(), sizeof(InstanceData) * g_Instances.size());
 			g_pImmediateContext->Unmap(g_pInstanceCB, 0);
 		}
-	}
-
-	// Рендеринг инстансированных объектов (все текстурированные кубы)
-	if (!g_Instances.empty())
-	{
+		g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
+		g_pImmediateContext->OMSetBlendState(nullptr, nullptr, 0xffffffff);
 		// Настройка состояния рендера
 		g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
 		g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
@@ -1115,6 +1108,7 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 	}
 
 	// Рендеринг прозрачных объектов
+	SortTransparentObjects(cameraPos, g_TransparentObjects);
 	float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	g_pImmediateContext->OMSetBlendState(g_pTransparentBlendState, blendFactor, 0xffffffff);
 	g_pImmediateContext->OMSetDepthStencilState(g_pTransparentDepthState, 0);
