@@ -856,6 +856,9 @@ void CleanupDevice() {
     g_pFullScreenVB->Release();
   if (g_pFullScreenLayout)
     g_pFullScreenLayout->Release();
+  if (g_pInstanceCB)
+    g_pInstanceCB->Release();
+
   for (auto &texture : g_CubeTextures) {
     if (texture)
       texture->Release();
@@ -905,9 +908,11 @@ void SetupSkyboxStates() {
   dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
   dsDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
   ID3D11DepthStencilState *pDSStateSkybox = nullptr;
-  g_pd3dDevice->CreateDepthStencilState(&dsDesc, &pDSStateSkybox);
-  g_pImmediateContext->OMSetDepthStencilState(pDSStateSkybox, 0);
-  pDSStateSkybox->Release();
+  if (SUCCEEDED(
+          g_pd3dDevice->CreateDepthStencilState(&dsDesc, &pDSStateSkybox))) {
+    g_pImmediateContext->OMSetDepthStencilState(pDSStateSkybox, 0);
+    pDSStateSkybox->Release();
+  }
 
   D3D11_RASTERIZER_DESC rsDesc = {};
   rsDesc.FillMode = D3D11_FILL_SOLID;
