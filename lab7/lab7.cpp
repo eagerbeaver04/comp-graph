@@ -87,9 +87,6 @@ Light g_Lights[2] = {
 
 
 std::vector<CubeData> g_Cubes = {
-	{ XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMMatrixTranslation(0.0f, 0.0f, 0.0f), false, true},
-		{ XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
-	{ XMFLOAT4(0.0f, 1.0f, 0.0f, 0.5f), XMMatrixIdentity(), true, false },
 		{ XMFLOAT4(g_Lights[0].Color.x, g_Lights[0].Color.y, g_Lights[0].Color.z, 1.0f),
 	  XMMatrixScaling(0.2f, 0.2f, 0.2f)* XMMatrixTranslation(g_Lights[0].Position.x, g_Lights[0].Position.y, g_Lights[0].Position.z),
 	  false, false },
@@ -105,11 +102,11 @@ struct InstanceData {
 	XMFLOAT3 padding;
 };
 
-// Глобальные переменные
-const int MAX_INSTANCES = 100; // Максимум инстансов
+const int MAX_INSTANCES = 100;
 ID3D11Buffer* g_pInstanceCB = nullptr;
 std::vector<InstanceData> g_Instances;
 std::vector<ID3D11ShaderResourceView*> g_CubeTextures;
+
 struct Plane
 {
 	float a, b, c, d;
@@ -126,7 +123,6 @@ FullScreenVertex g_FullScreenTriangle[3] = {
 	{  3.0f, -1.0f, 0, 1,   2.0f, 1.0f }
 };
 
-
 void ExtractFrustumPlanes(const XMMATRIX& M, Plane planes[6])
 {
 	planes[0].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[0];
@@ -139,27 +135,36 @@ void ExtractFrustumPlanes(const XMMATRIX& M, Plane planes[6])
 	planes[1].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[0];
 	planes[1].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[0];
 
-	planes[2].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[1];
-	planes[2].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[1];
-	planes[2].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[1];
-	planes[2].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[1];
+	planes[2].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[1];
+	planes[2].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[1];
+	planes[2].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[1];
+	planes[2].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[1];
 
-	planes[3].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[1];
-	planes[3].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[1];
-	planes[3].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[1];
-	planes[3].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[1];
+	planes[3].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[1];
+	planes[3].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[1];
+	planes[3].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[1];
+	planes[3].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[1];
 
-	planes[4].a = M.r[0].m128_f32[2];
-	planes[4].b = M.r[1].m128_f32[2];
-	planes[4].c = M.r[2].m128_f32[2];
-	planes[4].d = M.r[3].m128_f32[2];
+	planes[4].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[2];
+	planes[4].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[2];
+	planes[4].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[2];
+	planes[4].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[2];
 
 	planes[5].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[2];
 	planes[5].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[2];
 	planes[5].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[2];
 	planes[5].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[2];
-}
 
+	for (int i = 0; i < 6; i++)
+	{
+		XMVECTOR v = XMVectorSet(planes[i].a, planes[i].b, planes[i].c, planes[i].d);
+		v = XMPlaneNormalize(v);
+		planes[i].a = XMVectorGetX(v);
+		planes[i].b = XMVectorGetY(v);
+		planes[i].c = XMVectorGetZ(v);
+		planes[i].d = XMVectorGetW(v);
+	}
+}
 bool IsSphereInFrustum(const Plane planes[6], const XMVECTOR& center, float radius)
 {
 	for (int i = 0; i < 6; i++)
@@ -764,8 +769,6 @@ void CleanupDevice()
 		g_pCubeModelBuffer->Release();
 	if (g_pCubeVPBuffer)
 		g_pCubeVPBuffer->Release();
-	//if (g_pCubeTextureRV)
-	//	g_pCubeTextureRV->Release();
 	if (g_pSamplerLinear)
 		g_pSamplerLinear->Release();
 	if (g_pRenderTargetView)
@@ -916,7 +919,7 @@ void DrawInstancedCubes() {
 	g_CubeTextures[0],
 	g_CubeTextures[1],
 	g_CubeTextures[2],
-	g_pCubeNormalMapRV // Нормалмап
+	g_pCubeNormalMapRV
 	};
 	g_pImmediateContext->PSSetShaderResources(0, 4, textures);
 	g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
@@ -924,7 +927,7 @@ void DrawInstancedCubes() {
 	UINT offset = 0;
 	g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
 	g_pImmediateContext->IASetIndexBuffer(g_pCubeIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
-	g_pImmediateContext->VSSetConstantBuffers(2, 1, &g_pInstanceCB); // Правильный слот b2
+	g_pImmediateContext->VSSetConstantBuffers(2, 1, &g_pInstanceCB);
 	g_pImmediateContext->PSSetShaderResources(0, g_CubeTextures.size(), g_CubeTextures.data());
 	g_pImmediateContext->DrawIndexedInstanced(36, g_Instances.size(), 0, 0, 0);
 }
@@ -952,7 +955,6 @@ void PrepareRenderTarget(ID3D11RenderTargetView* rtv) {
 	g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
 }
 
-// Executes post-processing pass
 void ExecutePostProcessingPass() {
 	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 	g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
@@ -986,100 +988,119 @@ void PrepareInstancedRendering() {
 	g_pImmediateContext->PSSetConstantBuffers(3, 1, &g_pLightBuffer);
 	g_pImmediateContext->PSSetConstantBuffers(4, 1, &g_pCameraBuffer);
 }
-void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
+
+void DrawCubes(std::vector<InstanceData>& visibleInstances, Plane* frustumPlanes, int cubeCount, float radius, float rotationAngle)
 {
-	XMMATRIX vp = XMMatrixTranspose(view * proj);
-	g_Cubes[1].modelMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f);
-	g_Cubes[2].modelMatrix = XMMatrixTranslation(2.0f, 0.0f, 0.0f);
-
-	// Обновляем VP буфер
-	D3D11_MAPPED_SUBRESOURCE mapped;
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-	{
-		memcpy(mapped.pData, &vp, sizeof(XMMATRIX));
-		g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
-	}
-
-	// Подготовка данных для инстансинга (только для текстурированных кубов)
-	g_TransparentObjects.clear();
-	g_NonTransparentObjects.clear();
-	g_Instances.clear();
-
-	// 1. Создаем 10 вращающихся текстурированных кубов по кольцу (для инстансинга)
-	static float rotationAngle = 0.0f;
-	rotationAngle += 0.005f;
-
-	const float radius = 3.0f;
-	const int cubeCount = 10;
-
 	for (int i = 0; i < cubeCount; i++)
 	{
 		float angle = XM_2PI * i / cubeCount + rotationAngle;
 		float x = radius * cosf(angle);
 		float z = radius * sinf(angle);
 
-		XMMATRIX world = XMMatrixScaling(0.5f, 0.5f, 0.5f) *
+		XMVECTOR cubePos = XMVectorSet(x, 0.0f, z, 1.0f);
+		if (g_EnableFrustumCulling &&
+			!IsSphereInFrustum(frustumPlanes, cubePos, 1.2f))
+		{
+			continue;
+		}
+
+		XMMATRIX world = XMMatrixScaling(1.2f, 1.2f, 1.2f) *
 			XMMatrixRotationY(angle) *
 			XMMatrixTranslation(x, 0.0f, z);
 
-		XMMATRIX invWorld = XMMatrixInverse(nullptr, world);
-		XMMATRIX normalMatrix = XMMatrixTranspose(invWorld);
-
 		InstanceData data;
 		data.modelMatrix = XMMatrixTranspose(world);
-		//data.normalMatrix = normalMatrix;
-		data.textureIndex = i % g_CubeTextures.size(); // Циклически меняем текстуры
+		data.textureIndex = i % g_CubeTextures.size();
+		visibleInstances.push_back(data);
+	}
+}
 
-		g_Instances.push_back(data);
+void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
+{
+	XMMATRIX vp = view * proj;
+
+	Plane frustumPlanes[6];
+	ExtractFrustumPlanes(vp, frustumPlanes);
+	for (int i = 0; i < 6; i++) {
+		float len = sqrtf(frustumPlanes[i].a * frustumPlanes[i].a +
+			frustumPlanes[i].b * frustumPlanes[i].b +
+			frustumPlanes[i].c * frustumPlanes[i].c);
+		frustumPlanes[i].a /= len;
+		frustumPlanes[i].b /= len;
+		frustumPlanes[i].c /= len;
+		frustumPlanes[i].d /= len;
 	}
 
-	// 2. Добавляем оригинальные кубы из g_Cubes (прозрачные, световые и т.д.)
+	XMMATRIX vpT = XMMatrixTranspose(vp);
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+	{
+		memcpy(mapped.pData, &vpT, sizeof(XMMATRIX));
+		g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
+	}
+
+	g_TransparentObjects.clear();
+	g_NonTransparentObjects.clear();
+	g_Instances.clear();
+
+	static float rotationAngle = 0.0f;
+	rotationAngle += 0.005f;
+	float radius = 3.0f;
+	int cubeCount = 10;
+	std::vector<InstanceData> visibleInstances;
+	g_totalInstances = 2 * cubeCount;
+
+	DrawCubes(visibleInstances, frustumPlanes, cubeCount, radius, rotationAngle);
+
+	radius = 15.0f;
+
+	DrawCubes(visibleInstances, frustumPlanes, cubeCount, radius, rotationAngle);
+
+	g_finalInstanceCount = static_cast<int>(visibleInstances.size());
+
 	for (auto& cube : g_Cubes)
 	{
 		if (cube.isTextured)
 		{
-			// Для оригинальных текстурированных кубов тоже добавляем в инстансы
-			XMMATRIX invModel = XMMatrixInverse(nullptr, cube.modelMatrix);
+			XMVECTOR cubePos = cube.modelMatrix.r[3];
+			if (g_EnableFrustumCulling &&
+				!IsSphereInFrustum(frustumPlanes, cubePos, 1.0f))
+			{
+				continue;
+			}
+
 			InstanceData data;
 			data.modelMatrix = XMMatrixTranspose(cube.modelMatrix);
-/*			data.normalMatrix = XMMatrixTranspose(invModel)*/;
 			data.textureIndex = cube.textureIndex;
-			g_Instances.push_back(data);
+			visibleInstances.push_back(data);
+			g_finalInstanceCount++;
 		}
 		else
 		{
-			// Не текстурированные объекты (цветные)
 			if (cube.isTransparent)
-			{
 				g_TransparentObjects.push_back(&cube);
-			}
 			else
-			{
 				g_NonTransparentObjects.push_back(&cube);
-			}
 		}
 	}
 
-	if (!g_Instances.empty())
+	if (!visibleInstances.empty())
 	{
-		if (SUCCEEDED(g_pImmediateContext->Map(g_pInstanceCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+		if (SUCCEEDED(g_pImmediateContext->Map(g_pInstanceCB, 0,
+			D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
 		{
-			memcpy(mapped.pData, g_Instances.data(), sizeof(InstanceData) * g_Instances.size());
+			memcpy(mapped.pData, visibleInstances.data(),
+				sizeof(InstanceData) * visibleInstances.size());
 			g_pImmediateContext->Unmap(g_pInstanceCB, 0);
 		}
-		g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
-		g_pImmediateContext->OMSetBlendState(nullptr, nullptr, 0xffffffff);
-		// Настройка состояния рендера
+
 		g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
 		g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
 		g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
-
-		// Привязка константных буферов
 		g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);
 		g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
 		g_pImmediateContext->VSSetConstantBuffers(2, 1, &g_pInstanceCB);
 
-		// Привязка текстур
 		ID3D11ShaderResourceView* textures[] = {
 			g_CubeTextures[0],
 			g_CubeTextures[1],
@@ -1087,18 +1108,18 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 			g_pCubeNormalMapRV
 		};
 		g_pImmediateContext->PSSetShaderResources(0, 4, textures);
+		g_pImmediateContext->OMSetDepthStencilState(nullptr, 0);
 		g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
 
-		// Отрисовка инстансов
 		UINT stride = sizeof(SimpleVertex);
 		UINT offset = 0;
 		g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride, &offset);
 		g_pImmediateContext->IASetIndexBuffer(g_pCubeIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 		g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		g_pImmediateContext->DrawIndexedInstanced(36, static_cast<UINT>(g_Instances.size()), 0, 0, 0);
+		g_pImmediateContext->DrawIndexedInstanced(36,
+			static_cast<UINT>(visibleInstances.size()), 0, 0, 0);
 	}
 
-	// Рендеринг неинстансированных непрозрачных объектов (цветные кубы)
 	for (auto& cube : g_NonTransparentObjects)
 	{
 		PrepareColorCube(cube);
@@ -1107,7 +1128,6 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 		DrawCube();
 	}
 
-	// Рендеринг прозрачных объектов
 	SortTransparentObjects(cameraPos, g_TransparentObjects);
 	float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	g_pImmediateContext->OMSetBlendState(g_pTransparentBlendState, blendFactor, 0xffffffff);
@@ -1118,10 +1138,6 @@ void RenderCubes(const XMMATRIX& view, const XMMATRIX& proj, XMVECTOR cameraPos)
 		PrepareColorCube(cube);
 		DrawCube();
 	}
-
-	// Обновление счетчиков для UI
-	g_totalInstances = static_cast<int>(g_Instances.size() + g_NonTransparentObjects.size() + g_TransparentObjects.size());
-	g_finalInstanceCount = static_cast<int>(g_Instances.size());
 }
 
 void RenderImGui()
