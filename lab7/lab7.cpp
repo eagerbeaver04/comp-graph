@@ -1160,32 +1160,47 @@ void RenderImGui()
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
-void Render() {
-	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
-	g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, Colors::MidnightBlue);
-	g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+void Render()
+{
+	ID3D11RenderTargetView* mainRTV = g_pRenderTargetView;
+	ID3D11DepthStencilView* mainDSV = g_pDepthStencilView;
+
+	if (g_EnablePostProcessFilter)
+	{
+		g_pImmediateContext->OMSetRenderTargets(1, &g_pPostProcessRTV, mainDSV);
+		mainRTV = g_pPostProcessRTV;
+	}
+	else
+	{
+		g_pImmediateContext->OMSetRenderTargets(1, &mainRTV, mainDSV);
+	}
+
+	g_pImmediateContext->ClearRenderTargetView(mainRTV, Colors::MidnightBlue);
+	g_pImmediateContext->ClearDepthStencilView(mainDSV, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
 	XMMATRIX view, proj;
 	XMVECTOR camPos = UpdateCamera(view, proj);
 	XMStoreFloat3(&g_CameraPos, camPos);
 
 	D3D11_MAPPED_SUBRESOURCE mapped;
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pCameraBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pCameraBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+	{
 		memcpy(mapped.pData, &g_CameraPos, sizeof(XMFLOAT3));
 		g_pImmediateContext->Unmap(g_pCameraBuffer, 0);
 	}
-
 
 	XMMATRIX viewSkybox = view;
 	viewSkybox.r[3] = XMVectorSet(0, 0, 0, 1);
 	XMMATRIX vpSkybox = XMMatrixTranspose(viewSkybox * proj);
 
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pSkyboxVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pSkyboxVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+	{
 		memcpy(mapped.pData, &vpSkybox, sizeof(XMMATRIX));
 		g_pImmediateContext->Unmap(g_pSkyboxVPBuffer, 0);
 	}
 
-	if (SUCCEEDED(g_pImmediateContext->Map(g_pLightBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+	if (SUCCEEDED(g_pImmediateContext->Map(g_pLightBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+	{
 		memcpy(mapped.pData, g_Lights, sizeof(Light) * 2);
 		g_pImmediateContext->Unmap(g_pLightBuffer, 0);
 	}
@@ -1195,6 +1210,28 @@ void Render() {
 	g_pImmediateContext->RSSetState(nullptr);
 
 	RenderCubes(view, proj, camPos);
+
+	if (g_EnablePostProcessFilter)
+	{
+
+		g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+		g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, Colors::MidnightBlue);
+
+		g_pImmediateContext->VSSetShader(g_pPostProcessVS, nullptr, 0);
+		g_pImmediateContext->PSSetShader(g_pPostProcessPS, nullptr, 0);
+		g_pImmediateContext->PSSetShaderResources(0, 1, &g_pPostProcessSRV);
+		g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
+
+		UINT stride = sizeof(FullScreenVertex);
+		UINT offset = 0;
+		g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pFullScreenVB, &stride, &offset);
+		g_pImmediateContext->IASetInputLayout(g_pFullScreenLayout);
+		g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		g_pImmediateContext->Draw(3, 0);
+
+		ID3D11ShaderResourceView* nullSRV[] = { nullptr };
+		g_pImmediateContext->PSSetShaderResources(0, 1, nullSRV);
+	}
 
 	RenderImGui();
 
