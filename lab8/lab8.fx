@@ -1,120 +1,90 @@
+#define NUM_INSTANCES 11
+#define NUM_TEX 3
+
 cbuffer ModelBuffer : register(b0)
 {
-    matrix m;
+    matrix models[NUM_INSTANCES];
 };
 
 cbuffer VPBuffer : register(b1)
 {
-    matrix vp;
-};
-
-cbuffer LightBuffer : register(b3)
-{
-    struct Light {
-        float4 Position;
-        float4 Color;
-        float4 Attenuation;
-    } Lights[2];
-};
-
-cbuffer CameraBuffer : register(b4)
-{
-    float4 CameraPosition;
-};
-
-cbuffer InstanceBuffer : register(b2)
-{
-    struct InstanceData {
-        matrix model;
-        int textureIndex;
-        float3 padding;
-    } instances[100];
+    matrix viewProj;
 };
 
 struct VS_INPUT
 {
-    float3 pos : POSITION;
-    float3 normal : NORMAL;
-    float3 tangent : TANGENT;
-    float2 tex : TEXCOORD;
-    uint instanceID : SV_InstanceID;
+    float3 Pos : POSITION;
+    float3 Normal : NORMAL;
+    float2 TexCoord : TEXCOORD0;
 };
 
-struct PS_INPUT
+struct VS_OUTPUT
 {
-    float4 pos : SV_POSITION;
-    float2 tex : TEXCOORD0;
-    float3 worldPos : TEXCOORD1;
-    float3x3 tbn : TBN;
-    int TexIndex : TEXINDEX;
+    float4 Pos : SV_POSITION;
+    float3 WorldPos : TEXCOORD0;
+    float3 Normal : TEXCOORD1;
+    float2 TexCoord : TEXCOORD2;
+    uint   TexIndex : TEXCOORD3;
 };
 
-// Массив текстур вместо отдельных переменных
-Texture2D textures[3] : register(t0);
-Texture2D normalMap : register(t3);
-SamplerState samLinear : register(s0);
-
-PS_INPUT VS(VS_INPUT input)
+VS_OUTPUT VS(VS_INPUT input, uint instanceID : SV_InstanceID)
 {
-    PS_INPUT output;
-
-    matrix model = instances[input.instanceID].model;
-    output.TexIndex = instances[input.instanceID].textureIndex;
-
-    float4 worldPos = mul(float4(input.pos, 1.0), model);
-    output.worldPos = worldPos.xyz;
-    output.pos = mul(worldPos, vp);
-    output.tex = input.tex;
-
-    float3 T = normalize(mul(input.tangent, (float3x3)model));
-    float3 N = normalize(mul(input.normal, (float3x3)model));
-    T = normalize(T - dot(T, N) * N);
-    float3 B = cross(N, T);
-
-    output.tbn = float3x3(T, B, N);
-
+    VS_OUTPUT output;
+    float4 worldPos = mul(float4(input.Pos, 1.0), models[instanceID]);
+    output.Pos = mul(worldPos, viewProj);
+    output.WorldPos = worldPos.xyz;
+    output.Normal = mul(input.Normal, (float3x3)models[instanceID]);
+    output.TexCoord = input.TexCoord;
+    output.TexIndex = instanceID % NUM_TEX;
     return output;
 }
 
-float3 GetTextureColor(int index, float2 uv)
+Texture2D diffuseMap : register(t0);
+Texture2D normalMap  : register(t1);
+SamplerState samLinear : register(s0);
+
+cbuffer LightBuffer : register(b0)
 {
-    switch (index)
-    {
-    case 0: return textures[0].Sample(samLinear, uv).rgb;
-    case 1: return textures[1].Sample(samLinear, uv).rgb;
-    case 2: return textures[2].Sample(samLinear, uv).rgb;
-    default: return float3(1, 1, 1);
-    }
+    float3 light0Pos;
+    float pad0;
+    float3 light0Color;
+    float pad1;
+    float3 light1Pos;
+    float pad2;
+    float3 light1Color;
+    float pad3;
+};
+
+
+float3 ComputeTangent(float3 n)
+{
+    return (abs(n.y) > 0.99) ? float3(1, 0, 0) : normalize(cross(float3(0, 1, 0), n));
 }
 
-float4 PS(PS_INPUT input) : SV_Target
+float4 PS(VS_OUTPUT input) : SV_Target
 {
-    float3 normalMapSample = normalMap.Sample(samLinear, input.tex).rgb;
-    normalMapSample = normalize(normalMapSample * 2.0 - 1.0);
+    float4 diffuseColor = diffuseMap.Sample(samLinear, input.TexCoord);
 
-    float3 normal = mul(normalMapSample, input.tbn);
-    normal = normalize(normal);
 
-    float3 ambient = float3(0.1, 0.1, 0.1);
-    float3 diffuse = float3(0, 0, 0);
+    float3 normalSample = normalMap.Sample(samLinear, input.TexCoord).rgb * 2.0 - 1.0;
 
-    for (int i = 0; i < 2; i++)
-    {
-        float3 lightDir = Lights[i].Position.xyz - input.worldPos;
-        float distance = length(lightDir);
-        lightDir = normalize(lightDir);
+    float3 tangent = ComputeTangent(normalize(input.Normal));
+    float3 bitangent = normalize(cross(normalize(input.Normal), tangent));
+    float3x3 TBN = float3x3(tangent, bitangent, normalize(input.Normal));
 
-        float attenuation = 1.0 / (Lights[i].Attenuation.x +
-                                Lights[i].Attenuation.y * distance +
-                                Lights[i].Attenuation.z * distance * distance);
+    float3 perturbedNormal = normalize(mul(normalSample, TBN));
 
-        float diff = saturate(dot(normal, lightDir));
-        diffuse += Lights[i].Color.rgb * diff * attenuation;
-    }
+    float3 lightDir0 = normalize(light0Pos - input.WorldPos);
+    float diff0 = saturate(dot(perturbedNormal, lightDir0));
 
-    // Использование массива текстур вместо switch
-    float3 texColor = GetTextureColor(input.TexIndex, input.tex);
+    float3 lightDir1 = normalize(light1Pos - input.WorldPos);
+    float diff1 = saturate(dot(perturbedNormal, lightDir1));
 
-    float3 result = (ambient + diffuse) * texColor;
-    return float4(result, 1.0);
+    float3 color = 0;
+    if (diff0 > 0)
+        color += diffuseColor.rgb * light0Color * diff0;
+    if (diff1 > 0)
+        color += diffuseColor.rgb * light1Color * diff1;
+
+    return float4(color, diffuseColor.a);
 }

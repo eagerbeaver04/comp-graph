@@ -1,76 +1,77 @@
 cbuffer ModelBuffer : register(b0)
 {
-    matrix m;
+    matrix model;
 };
 
 cbuffer VPBuffer : register(b1)
 {
-    matrix vp;
-};
-
-cbuffer ColorBuffer : register(b2)
-{
-    float4 color;
-};
-
-cbuffer LightBuffer : register(b3)
-{
-    struct Light {
-        float4 position;
-        float4 color;
-        float4 attenuation;
-    } Lights[2];
-};
-
-cbuffer CameraBuffer : register(b4)
-{
-    float4 CameraPosition;
+    matrix viewProj;
 };
 
 struct VS_INPUT
 {
-    float3 pos : POSITION;
-    float3 normal : NORMAL;
+    float3 Pos : POSITION;
+    float3 Normal : NORMAL;
+    float2 Tex : TEXCOORD;
 };
 
 struct PS_INPUT
 {
-    float4 pos : SV_POSITION;
-    float3 normal : NORMAL;
-    float3 worldPos : TEXCOORD0;
+    float4 Pos : SV_POSITION;
+    float3 Normal : NORMAL;
+    float2 Tex : TEXCOORD;
+    float3 WorldPos : WORLDPOS;
 };
 
 PS_INPUT VS(VS_INPUT input)
 {
     PS_INPUT output;
-    float4 worldPos = mul(float4(input.pos, 1.0), m);
-    output.worldPos = worldPos.xyz;
-    output.pos = mul(worldPos, vp);
-    output.normal = mul(input.normal, (float3x3)m);
+    float4 worldPos = mul(float4(input.Pos, 1.0), model);
+    output.WorldPos = worldPos.xyz;
+    output.Pos = mul(worldPos, viewProj);
+    output.Normal = mul(input.Normal, (float3x3) model);
+    output.Tex = input.Tex;
     return output;
 }
 
+struct Light
+{
+    float3 Position;
+    float3 Color;
+};
+
+cbuffer LightBuffer : register(b0)
+{
+    Light light0;
+    Light light1;
+    float3 ambient;
+};
+
+cbuffer BaseColorBuffer : register(b1)
+{
+    float4 baseColor;
+};
+
 float4 PS(PS_INPUT input) : SV_Target
 {
-    input.normal = normalize(input.normal);
+    float3 normal = normalize(input.Normal);
 
-    float3 ambient = float3(0.1, 0.1, 0.1);
+    float3 toLight0 = light0.Position - input.WorldPos;
+    float dist0 = length(toLight0);
+    float3 lightDir0 = normalize(toLight0);
+    float range0 = 2.0;
+    float att0 = saturate(1.0 - (dist0 / range0) * (dist0 / range0));
+    float diff0 = max(dot(normal, lightDir0), 0.0) * att0;
 
-    float3 diffuse = float3(0, 0, 0);
-    for (int i = 0; i < 2; i++)
-    {
-        float3 lightDir = Lights[i].position.xyz - input.worldPos;
-        float distance = length(lightDir);
-        lightDir = normalize(lightDir);
+    float3 toLight1 = light1.Position - input.WorldPos;
+    float dist1 = length(toLight1);
+    float3 lightDir1 = normalize(toLight1);
+    float range1 = 2.0;
+    float att1 = saturate(1.0 - (dist1 / range1) * (dist1 / range1));
+    float diff1 = max(dot(normal, lightDir1), 0.0) * att1;
 
-        float attenuation = 1.0 / (Lights[i].attenuation.x +
-                                  Lights[i].attenuation.y * distance +
-                                  Lights[i].attenuation.z * distance * distance);
+    float3 diffuse = light0.Color * diff0 + light1.Color * diff1;
 
-        float diff = saturate(dot(input.normal, lightDir));
-        diffuse += Lights[i].color.rgb * diff * attenuation;
-    }
-
-    float3 result = (ambient + diffuse) * color.rgb;
-    return float4(result, color.a);
+    float3 finalColor = baseColor.rgb * diffuse;
+    return float4(finalColor, baseColor.a);
 }
