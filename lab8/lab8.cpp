@@ -19,12 +19,12 @@ IDXGISwapChain *g_pSwapChain = nullptr;
 ID3D11RenderTargetView *g_pRenderTargetView = nullptr;
 ID3D11DepthStencilView *g_pDepthStencilView = nullptr;
 ID3D11VertexShader *g_pTransparentVS = nullptr;
-ID3D11VertexShader *g_pVertexShader = nullptr;
-ID3D11PixelShader *g_pPixelShader = nullptr;
-ID3D11InputLayout *g_pVertexLayout = nullptr;
-ID3D11Buffer *g_pVertexBuffer = nullptr;
-ID3D11Buffer *g_pModelBuffer = nullptr;
-ID3D11Buffer *g_pVPBuffer = nullptr;
+ID3D11VertexShader *g_pCubeVS = nullptr;
+ID3D11PixelShader *g_pCubePS = nullptr;
+ID3D11InputLayout *g_pCubeInputLayout = nullptr;
+ID3D11Buffer *g_pCubeVertexBuffer = nullptr;
+ID3D11Buffer *g_pCubeModelBuffer = nullptr;
+ID3D11Buffer *g_pCubeVPBuffer = nullptr;
 ID3D11ShaderResourceView *g_pCubeTextureRV = nullptr;
 ID3D11ComputeShader *g_pCullingCS = nullptr;
 ID3D11Buffer *g_pSceneCBBuffer = nullptr;
@@ -32,10 +32,9 @@ ID3D11Buffer *g_pIndirectArgsBuffer = nullptr;
 ID3D11Buffer *g_pObjectsIdsBuffer = nullptr;
 ID3D11UnorderedAccessView *g_pIndirectArgsUAV = nullptr;
 ID3D11UnorderedAccessView *g_pObjectsIdsUAV = nullptr;
-bool g_EnableGpuCulling = false;
-int g_visibleCubesGPU = 0;
-ID3D11ShaderResourceView *g_pCubeNormalTextureRV = nullptr;
-ID3D11SamplerState *g_pSamplerLinear = nullptr;
+
+ID3D11ShaderResourceView *g_pCubeNormalMapRV = nullptr;
+ID3D11SamplerState *g_pSamplerLiinner = nullptr;
 ID3D11Buffer *g_pIndirectArgsStagingBuffer = nullptr;
 ID3D11VertexShader *g_pSkyboxVS = nullptr;
 ID3D11PixelShader *g_pSkyboxPS = nullptr;
@@ -62,7 +61,9 @@ ID3D11PixelShader *g_pPostProcessPS = nullptr;
 ID3D11Buffer *g_pFullScreenVB = nullptr;
 ID3D11InputLayout *g_pFullScreenLayout = nullptr;
 
-bool g_EnableFrustumCulling = false;
+bool g_EnableCPUCulling = false;
+bool g_EnableGPUCulling = false;
+int g_visibleCubesGPU = 0;
 float g_CubeAngle = 0.0f;
 float g_CameraAngle = 0.0f;
 bool g_MouseDragging = false;
@@ -70,7 +71,7 @@ POINT g_LastMousePos = {0, 0};
 float g_CameraAzimuth = 0.0f;
 float g_CameraElevation = 0.0f;
 int g_totalInstances = 0;
-int g_finalInstanceCount = 0;
+int g_visibleCubesСPU = 0;
 
 void ExtractFrustumPlanes(const XMMATRIX &M, Plane planes[6]) {
   planes[0].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[0];
@@ -375,9 +376,8 @@ HRESULT InitGraphics() {
                              &pBlob);
   if FAILED (hr)
     return hr;
-  hr = g_pd3dDevice->CreateVertexShader(pBlob->GetBufferPointer(),
-                                        pBlob->GetBufferSize(), nullptr,
-                                        &g_pVertexShader);
+  hr = g_pd3dDevice->CreateVertexShader(
+      pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &g_pCubeVS);
   if (FAILED(hr)) {
     pBlob->Release();
     return hr;
@@ -390,9 +390,9 @@ HRESULT InitGraphics() {
       {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, sizeof(float) * 6,
        D3D11_INPUT_PER_VERTEX_DATA, 0},
   };
-  hr =
-      g_pd3dDevice->CreateInputLayout(layoutDesc, 3, pBlob->GetBufferPointer(),
-                                      pBlob->GetBufferSize(), &g_pVertexLayout);
+  hr = g_pd3dDevice->CreateInputLayout(layoutDesc, 3, pBlob->GetBufferPointer(),
+                                       pBlob->GetBufferSize(),
+                                       &g_pCubeInputLayout);
   pBlob->Release();
   if (FAILED(hr))
     return hr;
@@ -401,9 +401,8 @@ HRESULT InitGraphics() {
                              &pBlob);
   if (FAILED(hr))
     return hr;
-  hr = g_pd3dDevice->CreatePixelShader(pBlob->GetBufferPointer(),
-                                       pBlob->GetBufferSize(), nullptr,
-                                       &g_pPixelShader);
+  hr = g_pd3dDevice->CreatePixelShader(
+      pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &g_pCubePS);
   pBlob->Release();
   if (FAILED(hr))
     return hr;
@@ -414,7 +413,7 @@ HRESULT InitGraphics() {
   bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
   D3D11_SUBRESOURCE_DATA initData = {};
   initData.pSysMem = g_CubeVertices;
-  hr = g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVertexBuffer);
+  hr = g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pCubeVertexBuffer);
   if (FAILED(hr))
     return hr;
 
@@ -423,7 +422,7 @@ HRESULT InitGraphics() {
   bd.ByteWidth = sizeof(XMMATRIX) * numInstances;
   bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
   bd.CPUAccessFlags = 0;
-  hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pModelBuffer);
+  hr = g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pCubeModelBuffer);
   if (FAILED(hr))
     return hr;
 
@@ -432,7 +431,7 @@ HRESULT InitGraphics() {
   vpBufferDesc.ByteWidth = sizeof(XMMATRIX);
   vpBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
   vpBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-  hr = g_pd3dDevice->CreateBuffer(&vpBufferDesc, nullptr, &g_pVPBuffer);
+  hr = g_pd3dDevice->CreateBuffer(&vpBufferDesc, nullptr, &g_pCubeVPBuffer);
   if (FAILED(hr))
     return hr;
 
@@ -442,7 +441,7 @@ HRESULT InitGraphics() {
     return hr;
 
   hr = CreateDDSTextureFromFile(g_pd3dDevice, L"cube_normal.dds", nullptr,
-                                &g_pCubeNormalTextureRV);
+                                &g_pCubeNormalMapRV);
   if (FAILED(hr))
     return hr;
 
@@ -454,7 +453,7 @@ HRESULT InitGraphics() {
   sampDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
   sampDesc.MinLOD = 0;
   sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
-  hr = g_pd3dDevice->CreateSamplerState(&sampDesc, &g_pSamplerLinear);
+  hr = g_pd3dDevice->CreateSamplerState(&sampDesc, &g_pSamplerLiinner);
   if (FAILED(hr))
     return hr;
 
@@ -716,25 +715,25 @@ void CleanupD3D() {
   if (g_pImmediateContext)
     g_pImmediateContext->ClearState();
 
-  if (g_pVertexBuffer)
-    g_pVertexBuffer->Release();
-  if (g_pVertexLayout)
-    g_pVertexLayout->Release();
-  if (g_pVertexShader)
-    g_pVertexShader->Release();
-  if (g_pPixelShader)
-    g_pPixelShader->Release();
-  if (g_pModelBuffer)
-    g_pModelBuffer->Release();
-  if (g_pVPBuffer)
-    g_pVPBuffer->Release();
+  if (g_pCubeVertexBuffer)
+    g_pCubeVertexBuffer->Release();
+  if (g_pCubeInputLayout)
+    g_pCubeInputLayout->Release();
+  if (g_pCubeVS)
+    g_pCubeVS->Release();
+  if (g_pCubePS)
+    g_pCubePS->Release();
+  if (g_pCubeModelBuffer)
+    g_pCubeModelBuffer->Release();
+  if (g_pCubeVPBuffer)
+    g_pCubeVPBuffer->Release();
   if (g_pCubeTextureRV)
     g_pCubeTextureRV->Release();
 
-  if (g_pCubeNormalTextureRV)
-    g_pCubeNormalTextureRV->Release();
-  if (g_pSamplerLinear)
-    g_pSamplerLinear->Release();
+  if (g_pCubeNormalMapRV)
+    g_pCubeNormalMapRV->Release();
+  if (g_pSamplerLiinner)
+    g_pSamplerLiinner->Release();
   if (g_pRenderTargetView)
     g_pRenderTargetView->Release();
   if (g_pDepthStencilView)
@@ -869,7 +868,7 @@ void RenderCubes() {
   g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pSkyboxVPBuffer);
   g_pImmediateContext->PSSetShader(g_pSkyboxPS, nullptr, 0);
   g_pImmediateContext->PSSetShaderResources(0, 1, &g_pSkyboxTextureRV);
-  g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
+  g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLiinner);
   g_pImmediateContext->Draw(ARRAYSIZE(g_SkyboxVertices), 0);
 
   pDSStateSkybox->Release();
@@ -883,38 +882,38 @@ void RenderCubes() {
 
   XMMATRIX vpCube = XMMatrixTranspose(view * proj);
   if (SUCCEEDED(g_pImmediateContext->Map(
-          g_pVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource))) {
+          g_pCubeVPBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource))) {
     memcpy(mappedResource.pData, &vpCube, sizeof(XMMATRIX));
-    g_pImmediateContext->Unmap(g_pVPBuffer, 0);
+    g_pImmediateContext->Unmap(g_pCubeVPBuffer, 0);
   }
 
-  const int nearInstances = 10;
-  const int farInstances = 10;
-  const int totalInstances = nearInstances + farInstances;
+  const int innerCubesCount = 10;
+  const int outerCubesCount = 10;
+  const int totalInstances = innerCubesCount + outerCubesCount;
   g_totalInstances = totalInstances;
 
-  XMMATRIX allInstanceMatrices[totalInstances];
+  XMMATRIX instanceMatrices[totalInstances];
 
-  float nearOrbitRadius = 3.0f;
-  float nearStep = XM_2PI / 10.0f;
-  for (int i = 0; i < nearInstances; i++) {
-    float offsetAngle = (i - 1) * nearStep;
+  float innerOrbitRadius = 3.0f;
+  float innerStep = XM_2PI / 10.0f;
+  for (int i = 0; i < innerCubesCount; i++) {
+    float offsetAngle = (i - 1) * innerStep;
     float orbitAngle = g_CubeAngle + offsetAngle;
     XMMATRIX translation =
-        XMMatrixTranslation(nearOrbitRadius * cosf(orbitAngle), 0.0f,
-                            nearOrbitRadius * sinf(orbitAngle));
-    allInstanceMatrices[i] = translation;
+        XMMatrixTranslation(innerOrbitRadius * cosf(orbitAngle), 0.0f,
+                            innerOrbitRadius * sinf(orbitAngle));
+    instanceMatrices[i] = translation;
   }
 
-  float farOrbitRadius = 15.0f;
-  float farStep = XM_2PI / farInstances;
-  for (int i = nearInstances; i < totalInstances; i++) {
-    float offsetAngle = (i - nearInstances) * farStep;
+  float outerOrbitRadius = 15.0f;
+  float outerStep = XM_2PI / outerCubesCount;
+  for (int i = innerCubesCount; i < totalInstances; i++) {
+    float offsetAngle = (i - innerCubesCount) * outerStep;
     float orbitAngle = g_CubeAngle + offsetAngle;
     XMMATRIX translation =
-        XMMatrixTranslation(farOrbitRadius * cosf(orbitAngle), 0.0f,
-                            farOrbitRadius * sinf(orbitAngle));
-    allInstanceMatrices[i] = translation;
+        XMMatrixTranslation(outerOrbitRadius * cosf(orbitAngle), 0.0f,
+                            outerOrbitRadius * sinf(orbitAngle));
+    instanceMatrices[i] = translation;
   }
 
   XMMATRIX matVP = view * proj;
@@ -930,11 +929,11 @@ void RenderCubes() {
     frustumPlanes[i].d /= len;
   }
 
-  if (g_EnableGpuCulling) {
+  if (g_EnableGPUCulling) {
     CullingData cullingData = {};
     cullingData.numShapes = totalInstances;
     for (int i = 0; i < totalInstances; i++) {
-      XMVECTOR center = allInstanceMatrices[i].r[3];
+      XMVECTOR center = instanceMatrices[i].r[3];
       XMVECTOR offset = XMVectorSet(0.5f, 0.5f, 0.5f, 0.0f);
       XMVECTOR minV = XMVectorSubtract(center, offset);
       XMVECTOR maxV = XMVectorAdd(center, offset);
@@ -987,40 +986,40 @@ void RenderCubes() {
       g_pImmediateContext->Unmap(g_pIndirectArgsStagingBuffer, 0);
     }
     g_visibleCubesGPU = visibleCount;
-
-    XMMATRIX allMatricesT[totalInstances];
+    g_visibleCubesСPU = totalInstances;
+    XMMATRIX transposedMatrices[totalInstances];
     for (int i = 0; i < totalInstances; i++) {
-      allMatricesT[i] = XMMatrixTranspose(allInstanceMatrices[i]);
+      transposedMatrices[i] = XMMatrixTranspose(instanceMatrices[i]);
     }
-    g_pImmediateContext->UpdateSubresource(g_pModelBuffer, 0, nullptr,
-                                           allMatricesT, 0, 0);
+    g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr,
+                                           transposedMatrices, 0, 0);
 
     g_pImmediateContext->DrawInstanced(ARRAYSIZE(g_CubeVertices), visibleCount,
                                        0, 0);
   } else {
-    XMMATRIX finalMatrices[totalInstances];
+    XMMATRIX visibleInstances[totalInstances];
     int finalInstanceCount = 0;
-    if (g_EnableFrustumCulling) {
+    if (g_EnableCPUCulling) {
       for (int i = 0; i < totalInstances; i++) {
         XMVECTOR center =
-            XMVectorSet(allInstanceMatrices[i].r[3].m128_f32[0],
-                        allInstanceMatrices[i].r[3].m128_f32[1],
-                        allInstanceMatrices[i].r[3].m128_f32[2], 1.0f);
+            XMVectorSet(instanceMatrices[i].r[3].m128_f32[0],
+                        instanceMatrices[i].r[3].m128_f32[1],
+                        instanceMatrices[i].r[3].m128_f32[2], 1.0f);
         if (IsSphereInFrustum(frustumPlanes, center, 1.0f)) {
-          finalMatrices[finalInstanceCount++] = allInstanceMatrices[i];
+          visibleInstances[finalInstanceCount++] = instanceMatrices[i];
         }
       }
     } else {
-      memcpy(finalMatrices, allInstanceMatrices, sizeof(allInstanceMatrices));
+      memcpy(visibleInstances, instanceMatrices, sizeof(instanceMatrices));
       finalInstanceCount = totalInstances;
     }
-    g_finalInstanceCount = finalInstanceCount;
+    g_visibleCubesСPU = finalInstanceCount;
     g_visibleCubesGPU = totalInstances;
     XMMATRIX finalMatricesT[totalInstances];
     for (int i = 0; i < finalInstanceCount; i++) {
-      finalMatricesT[i] = XMMatrixTranspose(finalMatrices[i]);
+      finalMatricesT[i] = XMMatrixTranspose(visibleInstances[i]);
     }
-    g_pImmediateContext->UpdateSubresource(g_pModelBuffer, 0, nullptr,
+    g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr,
                                            finalMatricesT, 0, 0);
     g_pImmediateContext->DrawInstanced(ARRAYSIZE(g_CubeVertices),
                                        finalInstanceCount, 0, 0);
@@ -1028,24 +1027,24 @@ void RenderCubes() {
 
   stride = sizeof(SimpleVertex);
   offset = 0;
-  g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride,
+  g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pCubeVertexBuffer, &stride,
                                           &offset);
-  g_pImmediateContext->IASetInputLayout(g_pVertexLayout);
+  g_pImmediateContext->IASetInputLayout(g_pCubeInputLayout);
   g_pImmediateContext->IASetPrimitiveTopology(
       D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  g_pImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
-  g_pImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
-  g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pModelBuffer);
-  g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pVPBuffer);
+  g_pImmediateContext->VSSetShader(g_pCubeVS, nullptr, 0);
+  g_pImmediateContext->PSSetShader(g_pCubePS, nullptr, 0);
+  g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pCubeModelBuffer);
+  g_pImmediateContext->VSSetConstantBuffers(1, 1, &g_pCubeVPBuffer);
   g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pLightBuffer);
 
   ID3D11ShaderResourceView *cubeSRVs[2] = {g_pCubeTextureRV,
-                                           g_pCubeNormalTextureRV};
+                                           g_pCubeNormalMapRV};
   g_pImmediateContext->PSSetShaderResources(0, 2, cubeSRVs);
-  g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
+  g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLiinner);
 
   g_pImmediateContext->DrawInstanced(ARRAYSIZE(g_CubeVertices),
-                                     g_finalInstanceCount, 0, 0);
+                                     g_visibleCubesСPU, 0, 0);
 
   LightBufferType lightData;
   lightData.light0Pos = XMFLOAT4(1.0f, 1.0f, 0.0f, 0.0f);
@@ -1060,17 +1059,46 @@ void RenderCubes() {
 
   XMMATRIX lightTranslate0 = XMMatrixTranslation(1.0f, 1.0f, 0.0f);
   XMMATRIX lightModel0 = XMMatrixTranspose(lightScale * lightTranslate0);
-  g_pImmediateContext->UpdateSubresource(g_pModelBuffer, 0, nullptr,
+  g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr,
                                          &lightModel0, 0, 0);
   XMFLOAT4 lightColor0(1.0f, 1.0f, 0.0f, 1.0f);
   g_pImmediateContext->Draw(ARRAYSIZE(g_CubeVertices), 0);
 
   XMMATRIX lightTranslate1 = XMMatrixTranslation(-1.0f, -1.0f, 0.0f);
   XMMATRIX lightModel1 = XMMatrixTranspose(lightScale * lightTranslate1);
-  g_pImmediateContext->UpdateSubresource(g_pModelBuffer, 0, nullptr,
+  g_pImmediateContext->UpdateSubresource(g_pCubeModelBuffer, 0, nullptr,
                                          &lightModel1, 0, 0);
   XMFLOAT4 lightColor1(1.0f, 1.0f, 1.0f, 1.0f);
   g_pImmediateContext->Draw(ARRAYSIZE(g_CubeVertices), 0);
+}
+
+void SetUpImGui() {
+  ImGui_ImplDX11_NewFrame();
+  ImGui_ImplWin32_NewFrame();
+  ImGui::NewFrame();
+  ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(60, 40), ImGuiCond_FirstUseEver);
+
+  ImGui::Begin("Options");
+  ImGui::Checkbox("Grayscale Filter", &g_EnablePostProcessFilter);
+  if (ImGui::Checkbox("Frustum Culling (CPU)", &g_EnableCPUCulling)) {
+    if (g_EnableCPUCulling) {
+      g_EnableGPUCulling = false;
+    }
+  }
+  if (ImGui::Checkbox("Frustum Culling (GPU)", &g_EnableGPUCulling)) {
+    if (g_EnableGPUCulling) {
+      g_EnableCPUCulling = false;
+    }
+  }
+  ImGui::Text("Total cubes: %d", g_totalInstances);
+  ImGui::Text("Visible cubes (CPU): %d", g_visibleCubesСPU);
+  ImGui::Text("Visible cubes (GPU): %d", g_visibleCubesGPU);
+  ImGui::End();
+
+  ImGui::Render();
+
+  ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
 void Render() {
@@ -1080,17 +1108,14 @@ void Render() {
     g_pImmediateContext->OMSetRenderTargets(1, &g_pPostProcessRTV,
                                             g_pDepthStencilView);
     g_pImmediateContext->ClearRenderTargetView(g_pPostProcessRTV, ClearColor);
-    g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView,
-                                               D3D11_CLEAR_DEPTH, 1.0f, 0);
-    RenderCubes();
   } else {
     g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView,
                                             g_pDepthStencilView);
     g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, ClearColor);
-    g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView,
-                                               D3D11_CLEAR_DEPTH, 1.0f, 0);
-    RenderCubes();
   }
+  g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView,
+                                             D3D11_CLEAR_DEPTH, 1.0f, 0);
+  RenderCubes();
   if (g_EnablePostProcessFilter) {
     g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 
@@ -1108,7 +1133,7 @@ void Render() {
     g_pImmediateContext->PSSetShader(g_pPostProcessPS, nullptr, 0);
 
     g_pImmediateContext->PSSetShaderResources(0, 1, &g_pPostProcessSRV);
-    g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLinear);
+    g_pImmediateContext->PSSetSamplers(0, 1, &g_pSamplerLiinner);
 
     g_pImmediateContext->Draw(3, 0);
 
@@ -1116,24 +1141,7 @@ void Render() {
     g_pImmediateContext->PSSetShaderResources(0, 1, nullSRV);
   }
 
-  ImGui_ImplDX11_NewFrame();
-  ImGui_ImplWin32_NewFrame();
-  ImGui::NewFrame();
-  ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(60, 40), ImGuiCond_FirstUseEver);
-
-  ImGui::Begin("Options");
-  ImGui::Checkbox("Grayscale Filter", &g_EnablePostProcessFilter);
-  ImGui::Checkbox("Frustum Culling (CPU)", &g_EnableFrustumCulling);
-  ImGui::Checkbox("GPU Culling", &g_EnableGpuCulling);
-  ImGui::Text("Total cubes: %d", g_totalInstances);
-  ImGui::Text("Visible cubes (CPU): %d", g_finalInstanceCount);
-  ImGui::Text("Visible cubes (GPU): %d", g_visibleCubesGPU);
-  ImGui::End();
-
-  ImGui::Render();
-
-  ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+  SetUpImGui();
 
   g_pSwapChain->Present(1, 0);
 }
