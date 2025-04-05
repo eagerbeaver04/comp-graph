@@ -89,32 +89,43 @@ float3 GetTextureColor(int index, float2 uv)
 
 float4 PS(PS_INPUT input) : SV_Target
 {
-    float3 normalMapSample = normalMap.Sample(samLinear, input.tex).rgb;
-    normalMapSample = normalize(normalMapSample * 2.0 - 1.0);
+    float4 diffuseColor = diffuseMap.Sample(samLinear, input.TexCoord);
 
-    float3 normal = mul(normalMapSample, input.tbn);
-    normal = normalize(normal);
+    // Извлечение и преобразование нормалей из normal map
+    float3 normalSample = normalMap.Sample(samLinear, input.TexCoord).rgb * 2.0 - 1.0;
 
+    // Построение TBN матрицы
+    float3 tangent = ComputeTangent(normalize(input.Normal));
+    float3 bitangent = normalize(cross(normalize(input.Normal), tangent));
+    float3x3 TBN = float3x3(tangent, bitangent, normalize(input.Normal));
+
+    // Преобразование нормали в мировое пространство
+    float3 perturbedNormal = normalize(mul(normalSample, TBN));
+
+    // Ambient освещение
     float3 ambient = float3(0.1, 0.1, 0.1);
-    float3 diffuse = float3(0, 0, 0);
 
-    for (int i = 0; i < 2; i++)
-    {
-        float3 lightDir = Lights[i].Position.xyz - input.worldPos;
-        float distance = length(lightDir);
-        lightDir = normalize(lightDir);
+    // Расчёт освещения для каждого источника
+    float3 totalDiffuse = float3(0, 0, 0);
 
-        float attenuation = 1.0 / (Lights[i].Attenuation.x +
-                                Lights[i].Attenuation.y * distance +
-                                Lights[i].Attenuation.z * distance * distance);
+    // Первый источник света
+    float3 lightVector0 = light0Pos - input.WorldPos;
+    float distance0 = length(lightVector0);
+    float3 lightDir0 = normalize(lightVector0);
+    float attenuation0 = 1.0 / (1.0 + 0.09 * distance0 + 0.032 * distance0 * distance0);
+    float diff0 = saturate(dot(perturbedNormal, lightDir0));
+    totalDiffuse += light0Color * diff0 * attenuation0;
 
-        float diff = saturate(dot(normal, lightDir));
-        diffuse += Lights[i].Color.rgb * diff * attenuation;
-    }
+    // Второй источник света
+    float3 lightVector1 = light1Pos - input.WorldPos;
+    float distance1 = length(lightVector1);
+    float3 lightDir1 = normalize(lightVector1);
+    float attenuation1 = 1.0 / (1.0 + 0.09 * distance1 + 0.032 * distance1 * distance1);
+    float diff1 = saturate(dot(perturbedNormal, lightDir1));
+    totalDiffuse += light1Color * diff1 * attenuation1;
 
-    // Использование массива текстур вместо switch
-    float3 texColor = GetTextureColor(input.TexIndex, input.tex);
+    // Комбинирование компонентов освещения
+    float3 finalColor = (ambient + totalDiffuse) * diffuseColor.rgb;
 
-    float3 result = (ambient + diffuse) * texColor;
-    return float4(result, 1.0);
+    return float4(finalColor, diffuseColor.a);
 }

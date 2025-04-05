@@ -46,12 +46,6 @@ ID3D11Buffer* g_pTransparentBuffer = nullptr;
 
 ID3D11Buffer* g_pLightBuffer = nullptr;
 
-ID3D11PixelShader* g_pLightPS = nullptr;
-ID3D11Buffer* g_pLightColorBuffer = nullptr;
-
-ID3D11Buffer* g_pBlueColorBuffer = nullptr;
-ID3D11Buffer* g_pGreenColorBuffer = nullptr;
-
 ID3D11BlendState* g_pAlphaBlendState = nullptr;
 ID3D11DepthStencilState* g_pDSStateTrans = nullptr;
 
@@ -537,37 +531,6 @@ HRESULT InitGraphics()
     if (FAILED(hr))
         return hr;
 
-    hr = CompileShaderFromFile(const_cast <wchar_t*>(L"light.hlsl"),
-        "main", "ps_5_0", &pBlob);
-    if (FAILED(hr))
-        return hr;
-    hr = g_pd3dDevice->CreatePixelShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(),
-        nullptr, &g_pLightPS);
-    pBlob->Release();
-    if (FAILED(hr))
-        return hr;
-
-    D3D11_BUFFER_DESC lcbDesc = {};
-    lcbDesc.Usage = D3D11_USAGE_DEFAULT;
-    lcbDesc.ByteWidth = sizeof(XMFLOAT4);
-    lcbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    lcbDesc.CPUAccessFlags = 0;
-    hr = g_pd3dDevice->CreateBuffer(&lcbDesc, nullptr, &g_pLightColorBuffer);
-    if (FAILED(hr))
-        return hr;
-
-    D3D11_BUFFER_DESC colorBufferDesc = {};
-    colorBufferDesc.Usage = D3D11_USAGE_DEFAULT;
-    colorBufferDesc.ByteWidth = sizeof(XMFLOAT4);
-    colorBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    colorBufferDesc.CPUAccessFlags = 0;
-
-    hr = g_pd3dDevice->CreateBuffer(&colorBufferDesc, nullptr, &g_pBlueColorBuffer);
-    if (FAILED(hr)) return hr;
-
-    hr = g_pd3dDevice->CreateBuffer(&colorBufferDesc, nullptr, &g_pGreenColorBuffer);
-    if (FAILED(hr)) return hr;
-
     D3D11_BLEND_DESC blendDesc = {};
     blendDesc.RenderTarget[0].BlendEnable = TRUE;
     blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
@@ -783,10 +746,6 @@ void CleanupD3D()
     if (g_pDSStateTrans)        g_pDSStateTrans->Release();
 
     if (g_pLightBuffer)         g_pLightBuffer->Release();
-    if (g_pLightPS)             g_pLightPS->Release();
-    if (g_pLightColorBuffer)    g_pLightColorBuffer->Release();
-    if (g_pBlueColorBuffer) g_pBlueColorBuffer->Release();
-    if (g_pGreenColorBuffer) g_pGreenColorBuffer->Release();
     if (g_pTransparentVS) g_pTransparentVS->Release();
 
     if (g_pPostProcessTex)      g_pPostProcessTex->Release();
@@ -1064,15 +1023,12 @@ void RenderCubes()
 
 
     LightBufferType lightData;
-    lightData.light0Pos = XMFLOAT3(1.0f, 0.0f, 0.0f);
-    lightData.light0Color = XMFLOAT3(3.0f, 3.0f, 0.0f);
-    lightData.light1Pos = XMFLOAT3(-1.0f, 0.0f, 0.0f);
-    lightData.light1Color = XMFLOAT3(3.0f, 3.0f, 3.0f);
-    lightData.ambient = XMFLOAT3(0.0f, 0.0f, 0.0f);
+    lightData.light0Pos = XMFLOAT4(1.0f, 1.0f, 0.0f, 0.0f);
+    lightData.light0Color = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f);
+    lightData.light1Pos = XMFLOAT4(-1.0f, 0.0f, 0.0, 0.0f);
+    lightData.light1Color = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.0f);
+    lightData.ambient = XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
     g_pImmediateContext->UpdateSubresource(g_pLightBuffer, 0, nullptr, &lightData, 0, 0);
-
-    g_pImmediateContext->PSSetShader(g_pLightPS, nullptr, 0);
-    g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pLightColorBuffer);
 
     XMMATRIX lightScale = XMMatrixScaling(0.1f, 0.1f, 0.1f);
 
@@ -1080,14 +1036,12 @@ void RenderCubes()
     XMMATRIX lightModel0 = XMMatrixTranspose(lightScale * lightTranslate0);
     g_pImmediateContext->UpdateSubresource(g_pModelBuffer, 0, nullptr, &lightModel0, 0, 0);
     XMFLOAT4 lightColor0(1.0f, 1.0f, 0.0f, 1.0f);
-    g_pImmediateContext->UpdateSubresource(g_pLightColorBuffer, 0, nullptr, &lightColor0, 0, 0);
     g_pImmediateContext->Draw(ARRAYSIZE(g_CubeVertices), 0);
 
     XMMATRIX lightTranslate1 = XMMatrixTranslation(-1.0f, -1.0f, 0.0f);
     XMMATRIX lightModel1 = XMMatrixTranspose(lightScale * lightTranslate1);
     g_pImmediateContext->UpdateSubresource(g_pModelBuffer, 0, nullptr, &lightModel1, 0, 0);
     XMFLOAT4 lightColor1(1.0f, 1.0f, 1.0f, 1.0f);
-    g_pImmediateContext->UpdateSubresource(g_pLightColorBuffer, 0, nullptr, &lightColor1, 0, 0);
     g_pImmediateContext->Draw(ARRAYSIZE(g_CubeVertices), 0);
 
 }
@@ -1095,8 +1049,7 @@ void RenderCubes()
 
 void Render()
 {
-
-    float ClearColor[4] = { 0.2f, 0.2f, 0.4f, 1.0f };
+    static float ClearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f };
 
     if (g_EnablePostProcessFilter)
     {

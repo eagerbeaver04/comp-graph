@@ -45,16 +45,11 @@ SamplerState samLinear : register(s0);
 
 cbuffer LightBuffer : register(b0)
 {
-    float3 light0Pos;
-    float pad0;
-    float3 light0Color;
-    float pad1;
-    float3 light1Pos;
-    float pad2;
-    float3 light1Color;
-    float pad3;
+    float4 light0Pos;
+    float4 light0Color;
+    float4 light1Pos;
+    float4 light1Color;
 };
-
 
 float3 ComputeTangent(float3 n)
 {
@@ -65,7 +60,6 @@ float4 PS(VS_OUTPUT input) : SV_Target
 {
     float4 diffuseColor = diffuseMap.Sample(samLinear, input.TexCoord);
 
-
     float3 normalSample = normalMap.Sample(samLinear, input.TexCoord).rgb * 2.0 - 1.0;
 
     float3 tangent = ComputeTangent(normalize(input.Normal));
@@ -74,17 +68,25 @@ float4 PS(VS_OUTPUT input) : SV_Target
 
     float3 perturbedNormal = normalize(mul(normalSample, TBN));
 
-    float3 lightDir0 = normalize(light0Pos - input.WorldPos);
+    float3 ambient = float3(0.1, 0.1, 0.1);
+
+    float3 totalDiffuse = float3(0, 0, 0);
+
+    float3 lightVector0 = light0Pos.xyz - input.WorldPos;
+    float distance0 = length(lightVector0);
+    float3 lightDir0 = normalize(lightVector0);
+    float attenuation0 = 1.0 / (1.0 + 0.09 * distance0 + 0.032 * distance0 * distance0);
     float diff0 = saturate(dot(perturbedNormal, lightDir0));
+    totalDiffuse += light0Color.rgb * diff0 * attenuation0;
 
-    float3 lightDir1 = normalize(light1Pos - input.WorldPos);
+    float3 lightVector1 = light1Pos.xyz - input.WorldPos;
+    float distance1 = length(lightVector1);
+    float3 lightDir1 = normalize(lightVector1);
+    float attenuation1 = 1.0 / (1.0 + 0.09 * distance1 + 0.032 * distance1 * distance1);
     float diff1 = saturate(dot(perturbedNormal, lightDir1));
+    totalDiffuse += light1Color.rgb * diff1 * attenuation1;
 
-    float3 color = 0;
-    if (diff0 > 0)
-        color += diffuseColor.rgb * light0Color * diff0;
-    if (diff1 > 0)
-        color += diffuseColor.rgb * light1Color * diff1;
+    float3 finalColor = (ambient + totalDiffuse) * diffuseColor.rgb;
 
-    return float4(color, diffuseColor.a);
+    return float4(finalColor, diffuseColor.a);
 }

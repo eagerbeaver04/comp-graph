@@ -161,11 +161,6 @@
     <CopyFileToFolders Include="skybox.dds" />
   </ItemGroup>
   <ItemGroup>
-    <CopyFileToFolders Include="light.hlsl">
-      <FileType>Document</FileType>
-    </CopyFileToFolders>
-  </ItemGroup>
-  <ItemGroup>
     <CopyFileToFolders Include="gpu_culling.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>

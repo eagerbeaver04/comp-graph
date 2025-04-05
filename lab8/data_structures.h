@@ -100,8 +100,6 @@ FullScreenVertex g_FullScreenTriangle[3] =
     {  3.0f, -1.0f, 0, 1,   2.0f, 1.0f }
 };
 
-
-
 struct SkyboxVertex
 {
     float x, y, z;
@@ -149,14 +147,9 @@ SkyboxVertex g_SkyboxVertices[] =
 
 struct LightBufferType
 {
-    XMFLOAT3 light0Pos;
-    float pad0;
-    XMFLOAT3 light0Color;
-    float pad1;
-    XMFLOAT3 light1Pos;
-    float pad2;
-    XMFLOAT3 light1Color;
-    float pad3;
-    XMFLOAT3 ambient;
-    float pad4;
+    XMFLOAT4 light0Pos;
+    XMFLOAT4 light0Color;
+    XMFLOAT4 light1Pos;
+    XMFLOAT4 light1Color;
+    XMFLOAT4 ambient;
 };

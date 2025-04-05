@@ -93,7 +93,6 @@
     <CopyFileToFolders Include="cube.dds" />
     <CopyFileToFolders Include="cube_normal.dds" />
     <CopyFileToFolders Include="skybox.dds" />
-    <CopyFileToFolders Include="light.hlsl" />
     <CopyFileToFolders Include="gpu_culling.hlsl" />
     <CopyFileToFolders Include="lab8.fx" />
     <CopyFileToFolders Include="skybox.fx" />
