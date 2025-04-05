@@ -1,4 +1,4 @@
-#define NUM_INSTANCES 11
+#define NUM_INSTANCES 10
 #define NUM_TEX 3
 
 cbuffer ModelBuffer : register(b0)
