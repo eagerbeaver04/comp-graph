@@ -1,66 +1,63 @@
 cbuffer CullingParams : register(b0)
 {
-    uint numShapes;
-    uint pad0;
-    uint pad1;
-    uint pad2;
-    float4 bbMin[20];
-    float4 bbMax[20];
+    uint ShapeCount;
+    uint3 _Padding;
+    float4 BoundingBoxMin[20];
+    float4 BoundingBoxMax[20];
 };
 
-cbuffer SceneData : register(b1)
+cbuffer FrustumData : register(b1)
 {
-    float4x4 viewProjectionMatrix;
-    float4 planes[6];
+    float4x4 ViewProjection;
+    float4 FrustumPlanes[6];
 };
 
-RWStructuredBuffer<uint> indirectArgsBuffer : register(u0);
-RWStructuredBuffer<uint> objectsIdsBuffer : register(u1);
+RWStructuredBuffer<uint> DrawIndirectArgs : register(u0);
+RWStructuredBuffer<uint> VisibleObjects : register(u1);
 
 [numthreads(64, 1, 1)]
-void main(uint3 DTid : SV_DispatchThreadID)
+void main(uint3 ThreadID : SV_DispatchThreadID)
 {
-    uint idx = DTid.x;
-    if (idx >= numShapes)
-        return;
-    
-    float4 minVal = bbMin[idx];
-    float4 maxVal = bbMax[idx];
-    
-    float3 corners[8];
-    corners[0] = float3(minVal.x, minVal.y, minVal.z);
-    corners[1] = float3(maxVal.x, minVal.y, minVal.z);
-    corners[2] = float3(minVal.x, maxVal.y, minVal.z);
-    corners[3] = float3(minVal.x, minVal.y, maxVal.z);
-    corners[4] = float3(maxVal.x, maxVal.y, minVal.z);
-    corners[5] = float3(maxVal.x, minVal.y, maxVal.z);
-    corners[6] = float3(minVal.x, maxVal.y, maxVal.z);
-    corners[7] = float3(maxVal.x, maxVal.y, maxVal.z);
+    const uint objectIndex = ThreadID.x;
 
-    bool isVisible = true;
-    for (int p = 0; p < 6; p++)
+    if (objectIndex >= ShapeCount)
+        return;
+
+    const float3 minBounds = BoundingBoxMin[objectIndex].xyz;
+    const float3 maxBounds = BoundingBoxMax[objectIndex].xyz;
+
+    const float3 boxCorners[8] = {
+        float3(minBounds.x, minBounds.y, minBounds.z),
+        float3(maxBounds.x, minBounds.y, minBounds.z),
+        float3(minBounds.x, maxBounds.y, minBounds.z),
+        float3(minBounds.x, minBounds.y, maxBounds.z),
+        float3(maxBounds.x, maxBounds.y, minBounds.z),
+        float3(maxBounds.x, minBounds.y, maxBounds.z),
+        float3(minBounds.x, maxBounds.y, maxBounds.z),
+        float3(maxBounds.x, maxBounds.y, maxBounds.z)
+    };
+
+    bool visible = true;
+
+    [unroll]
+    for (int planeIdx = 0; planeIdx < 6; ++planeIdx)
     {
-        int outsideCount = 0;
-        for (int c = 0; c < 8; c++)
+        int outsidePoints = 0;
+
+        [unroll]
+        for (int cornerIdx = 0; cornerIdx < 8; ++cornerIdx)
+            if (dot(FrustumPlanes[planeIdx].xyz, boxCorners[cornerIdx]) + FrustumPlanes[planeIdx].w < 0)
+                ++outsidePoints;
+        if (outsidePoints == 8)
         {
-            float distance = dot(planes[p].xyz, corners[c]) + planes[p].w;
-            if (distance < 0.0)
-            {
-                outsideCount++;
-            }
-        }
-        if (outsideCount == 8)
-        {
-            isVisible = false;
+            visible = false;
             break;
         }
     }
-
-    if (isVisible)
+    if (visible)
     {
-        uint visibleIndex;
-        InterlockedAdd(indirectArgsBuffer[1], 1, visibleIndex);
-        objectsIdsBuffer[visibleIndex] = idx;
+        uint outputPos;
+        InterlockedAdd(DrawIndirectArgs[1], 1, outputPos);
+        VisibleObjects[outputPos] = objectIndex;
     }
 }
-
